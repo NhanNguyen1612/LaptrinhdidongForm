@@ -1,4 +1,4 @@
-const CACHE_NAME = 'vku-survey-v1.0.0';
+const CACHE_NAME = 'vku-survey-v1.1.0';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -39,6 +39,10 @@ self.addEventListener('activate', (event) => {
 // Fetch Event: Cache-First strategy with Network Fallback for Zero-Connectivity Offline Usage
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+  // Bypass cache for API endpoints
+  if (event.request.url.includes('/api/') || event.request.url.includes('jsonplaceholder') || event.request.url.includes('mockapi')) {
+    return;
+  }
 
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {

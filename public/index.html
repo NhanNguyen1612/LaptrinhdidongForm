@@ -135,6 +135,12 @@
           <p>Nhập thông tin kiểm tra từng hạng mục thiết bị riêng biệt tại VKU</p>
         </div>
 
+        <!-- Auto-Save Draft Alert -->
+        <div id="draft-alert" class="draft-alert hidden" style="background:#EFF6FF; border:1px solid #93C5FD; color:#1E40AF; padding:10px 14px; border-radius:8px; margin-bottom:16px; display:flex; align-items:center; justify-content:space-between; font-size:13px;">
+          <span>📝 <strong>Đã khôi phục bản nháp dở dang</strong> (lưu lúc <span id="draft-time">vừa xong</span>)</span>
+          <button type="button" id="btn-clear-draft" class="btn btn-outline btn-sm" style="font-size:11px; padding:3px 8px; border-color:#93C5FD; color:#1E40AF;">🗑️ Xóa nháp</button>
+        </div>
+
         <form id="inspection-form">
           <!-- Surveyor Info -->
           <div class="form-row">
@@ -219,6 +225,11 @@
             <p>Trạng thái kết nối hiện tại: <strong id="sync-connection-status" class="text-offline">Đang Offline</strong></p>
             <p>Số bản ghi chờ đồng bộ lên máy chủ: <span class="badge badge-warning" id="sync-queue-count">0</span></p>
             
+            <div style="margin: 12px 0;">
+              <label for="api-endpoint-input" style="font-size:12px; font-weight:bold; color:#475569;">🌐 Server API Endpoint Đồng bộ:</label>
+              <input type="text" id="api-endpoint-input" style="width:100%; font-size:12px; padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; margin-top:4px;" placeholder="https://jsonplaceholder.typicode.com/posts (Hoặc URL REST API thực tế)">
+            </div>
+
             <div class="sync-actions">
               <button id="btn-force-sync" class="btn btn-primary">
                 ☁️ Đồng bộ danh sách với Server Ngay

@@ -7,11 +7,14 @@
 const DB_NAME = 'VKUSurveyDB';
 const DB_VERSION = 1;
 const STORE_NAME = 'surveys';
+const DRAFT_KEY = 'vku_survey_draft';
+const DEFAULT_API_ENDPOINT = 'https://jsonplaceholder.typicode.com/posts';
 
 let db = null;
 let deferredInstallPrompt = null;
 let isSimulatedServerActive = false;
 let itemCounter = 0;
+let draftSaveTimeout = null;
 
 // --- INITIALIZATION ---
 document.addEventListener('DOMContentLoaded', async () => {
@@ -33,10 +36,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   await renderDashboard();
   updateStorageEstimate();
 
-  // 6. Initialize First Inspection Item Entry in Form
-  const container = document.getElementById('inspection-items-container');
-  if (container && container.children.length === 0) {
-    addInspectionItemCard();
+  // 6. Load Draft or Initialize First Inspection Item Entry in Form
+  loadDraftFromStorage();
+
+  // 7. Trigger Auto Sync if online
+  if (navigator.onLine) {
+    setTimeout(() => autoSyncOfflineQueue(), 1500);
   }
 });
 
@@ -193,10 +198,142 @@ function updateNetworkStatus() {
 async function autoSyncOfflineQueue() {
   const surveys = await getAllSurveysFromDB();
   const unsynced = surveys.filter(s => !s.synced);
-  if (unsynced.length > 0) {
+  if (unsynced.length > 0 && (navigator.onLine || isSimulatedServerActive)) {
     showToast(`Phát hiện ${unsynced.length} bản ghi chưa đồng bộ. Đang tự động đẩy dữ liệu...`, 'info');
     await syncData();
   }
+}
+
+// ==========================================================================
+// 3.1 FORM DRAFT AUTO-SAVE ENGINE & API CONFIG
+// ==========================================================================
+function getApiEndpoint() {
+  const inputEl = document.getElementById('api-endpoint-input');
+  let url = inputEl ? inputEl.value.trim() : '';
+  if (!url) {
+    url = localStorage.getItem('vku_api_endpoint') || DEFAULT_API_ENDPOINT;
+  }
+  return url;
+}
+
+function saveDraftToStorage() {
+  clearTimeout(draftSaveTimeout);
+  draftSaveTimeout = setTimeout(() => {
+    const surveyorName = document.getElementById('surveyor-name')?.value.trim() || '';
+    const surveyorId = document.getElementById('surveyor-id')?.value.trim() || '';
+    const building = document.getElementById('building')?.value || '';
+    const roomDetails = document.getElementById('room-details')?.value.trim() || '';
+    const gpsLat = document.getElementById('gps-lat')?.value || '';
+    const gpsLng = document.getElementById('gps-lng')?.value || '';
+
+    const itemCards = document.querySelectorAll('.inspection-item-entry');
+    const items = [];
+    itemCards.forEach(card => {
+      const cardIdStr = card.id.replace('item-entry-', '');
+      const category = card.querySelector('.item-category')?.value || '';
+      const condition = card.querySelector(`input[name="item-condition-${cardIdStr}"]:checked`)?.value || 'good';
+      const description = card.querySelector('.item-desc')?.value.trim() || '';
+      const photoBase64 = itemPhotoBase64Map[cardIdStr] || null;
+
+      if (category || description || photoBase64) {
+        items.push({ category, condition, description, photoBase64 });
+      }
+    });
+
+    if (surveyorName || surveyorId || building || roomDetails || items.length > 0) {
+      const draftData = {
+        surveyorName,
+        surveyorId,
+        building,
+        roomDetails,
+        gpsLat,
+        gpsLng,
+        items,
+        savedAt: new Date().toISOString()
+      };
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(draftData));
+      console.log('[Draft] Auto-saved form draft to localStorage.');
+    }
+  }, 400);
+}
+
+function loadDraftFromStorage() {
+  const container = document.getElementById('inspection-items-container');
+  const rawDraft = localStorage.getItem(DRAFT_KEY);
+
+  if (!rawDraft) {
+    if (container && container.children.length === 0) {
+      addInspectionItemCard();
+    }
+    return;
+  }
+
+  try {
+    const draft = JSON.parse(rawDraft);
+    if (draft.surveyorName && document.getElementById('surveyor-name')) document.getElementById('surveyor-name').value = draft.surveyorName;
+    if (draft.surveyorId && document.getElementById('surveyor-id')) document.getElementById('surveyor-id').value = draft.surveyorId;
+    if (draft.building && document.getElementById('building')) document.getElementById('building').value = draft.building;
+    if (draft.roomDetails && document.getElementById('room-details')) document.getElementById('room-details').value = draft.roomDetails;
+    if (draft.gpsLat && document.getElementById('gps-lat')) document.getElementById('gps-lat').value = draft.gpsLat;
+    if (draft.gpsLng && document.getElementById('gps-lng')) document.getElementById('gps-lng').value = draft.gpsLng;
+    
+    if (draft.gpsLat && draft.gpsLng) {
+      const gpsDisplay = document.getElementById('gps-display');
+      if (gpsDisplay) gpsDisplay.innerText = `📍 Lat: ${draft.gpsLat}, Lng: ${draft.gpsLng} (Khôi phục từ nháp)`;
+    }
+
+    if (container) {
+      container.innerHTML = '';
+      itemCounter = 0;
+    }
+
+    if (draft.items && Array.isArray(draft.items) && draft.items.length > 0) {
+      draft.items.forEach(it => {
+        addInspectionItemCard();
+        const currentId = itemCounter;
+        const card = document.getElementById(`item-entry-${currentId}`);
+        if (card) {
+          if (it.category) card.querySelector('.item-category').value = it.category;
+          if (it.description) card.querySelector('.item-desc').value = it.description;
+          if (it.condition) {
+            const radio = card.querySelector(`input[name="item-condition-${currentId}"][value="${it.condition}"]`);
+            if (radio) radio.checked = true;
+          }
+          if (it.photoBase64) {
+            itemPhotoBase64Map[currentId] = it.photoBase64;
+            const previewImg = document.getElementById(`photo-preview-${currentId}`);
+            const previewContainer = document.getElementById(`photo-preview-container-${currentId}`);
+            if (previewImg && previewContainer) {
+              previewImg.src = it.photoBase64;
+              previewContainer.classList.remove('hidden');
+            }
+          }
+        }
+      });
+    } else if (container) {
+      addInspectionItemCard();
+    }
+
+    const draftAlert = document.getElementById('draft-alert');
+    const draftTime = document.getElementById('draft-time');
+    if (draftAlert && draftTime) {
+      const formattedTime = new Date(draft.savedAt).toLocaleTimeString('vi-VN');
+      draftTime.innerText = formattedTime;
+      draftAlert.classList.remove('hidden');
+    }
+  } catch (err) {
+    console.error('[Draft] Parse error:', err);
+    if (container && container.children.length === 0) {
+      addInspectionItemCard();
+    }
+  }
+}
+
+function clearDraftStorage() {
+  localStorage.removeItem(DRAFT_KEY);
+  const draftAlert = document.getElementById('draft-alert');
+  if (draftAlert) draftAlert.classList.add('hidden');
+  console.log('[Draft] Cleared draft from localStorage.');
 }
 
 // ==========================================================================
@@ -228,10 +365,25 @@ function setupEventListeners() {
     });
   }
 
+  // API Endpoint Config listener
+  const apiInput = document.getElementById('api-endpoint-input');
+  if (apiInput) {
+    const savedEndpoint = localStorage.getItem('vku_api_endpoint') || DEFAULT_API_ENDPOINT;
+    apiInput.value = savedEndpoint;
+    apiInput.addEventListener('change', () => {
+      const val = apiInput.value.trim() || DEFAULT_API_ENDPOINT;
+      localStorage.setItem('vku_api_endpoint', val);
+      showToast('Đã lưu Cấu hình Endpoint Server API', 'info');
+    });
+  }
+
   // Add Item Button
   const btnAddItem = document.getElementById('btn-add-item');
   if (btnAddItem) {
-    btnAddItem.addEventListener('click', addInspectionItemCard);
+    btnAddItem.addEventListener('click', () => {
+      addInspectionItemCard();
+      saveDraftToStorage();
+    });
   }
 
   const btnGetGps = document.getElementById('btn-get-gps');
@@ -242,7 +394,20 @@ function setupEventListeners() {
   const form = document.getElementById('inspection-form');
   if (form) {
     form.addEventListener('submit', handleFormSubmit);
+    form.addEventListener('input', saveDraftToStorage);
+    form.addEventListener('change', saveDraftToStorage);
   }
+
+  document.getElementById('btn-clear-draft')?.addEventListener('click', () => {
+    clearDraftStorage();
+    if (form) form.reset();
+    const container = document.getElementById('inspection-items-container');
+    if (container) container.innerHTML = '';
+    itemCounter = 0;
+    addInspectionItemCard();
+    document.getElementById('gps-display').innerText = 'Chưa lấy tọa độ GPS';
+    showToast('Đã xóa bản nháp dở dang!', 'info');
+  });
 
   document.getElementById('search-input')?.addEventListener('input', renderDashboard);
   document.getElementById('filter-building')?.addEventListener('change', renderDashboard);
@@ -557,7 +722,8 @@ async function handleFormSubmit(e) {
       });
     }
 
-    // Reset Form
+    // Clear draft storage & Reset Form
+    clearDraftStorage();
     document.getElementById('inspection-form').reset();
     document.getElementById('inspection-items-container').innerHTML = '';
     itemCounter = 0;
@@ -565,6 +731,11 @@ async function handleFormSubmit(e) {
     document.getElementById('gps-display').innerText = 'Chưa lấy tọa độ GPS';
 
     switchTab('tab-dashboard');
+
+    // Trigger auto-sync if network is online
+    if (navigator.onLine || isSimulatedServerActive) {
+      setTimeout(() => autoSyncOfflineQueue(), 800);
+    }
   } catch (err) {
     console.error('[Form] Save error:', err);
     showToast('Lỗi khi lưu phiếu khảo sát!', 'error');
@@ -811,22 +982,81 @@ async function syncData() {
     return;
   }
 
-  if (!navigator.onLine && !isSimulatedServerActive) {
-    showToast('Thiết bị đang OFFLINE! Không thể kết nối server đồng bộ.', 'error');
-    logSync('Thất bại: Thiết bị đang offline và chưa bật server giả lập.');
+  const isOnline = navigator.onLine;
+  if (!isOnline && !isSimulatedServerActive) {
+    showToast('Thiết bị đang OFFLINE! Dữ liệu được lưu an toàn tại Hàng chờ Offline (IndexedDB).', 'error');
+    logSync('Đồng bộ thất bại: Thiết bị chưa có kết nối mạng Internet.');
     return;
   }
 
-  logSync(`Bắt đầu đồng bộ ${unsynced.length} phiếu khảo sát...`);
+  const endpoint = getApiEndpoint();
+  logSync(`🌐 Đang kết nối Server Cloud API [${endpoint}] để đồng bộ ${unsynced.length} phiếu khảo sát...`);
+
+  let successCount = 0;
 
   for (const item of unsynced) {
-    item.synced = true;
-    await saveSurveyToDB(item);
+    try {
+      let isSyncedSuccess = false;
+
+      if (isOnline) {
+        // Send real HTTP POST request to API Server
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({
+            id: item.id,
+            surveyorName: item.surveyorName,
+            surveyorId: item.surveyorId,
+            building: item.building,
+            roomDetails: item.roomDetails,
+            overallCondition: item.overallCondition,
+            items: item.items,
+            gpsLocation: item.gpsLocation,
+            timestamp: item.timestamp
+          })
+        });
+
+        if (res.ok || res.status === 200 || res.status === 201) {
+          isSyncedSuccess = true;
+          logSync(`✅ HTTP ${res.status}: Đã đẩy thành công phiếu [${item.id}] lên Cloud API Server.`);
+        } else {
+          logSync(`⚠️ HTTP ${res.status}: Máy chủ phản hồi cảnh báo khi nhận phiếu [${item.id}].`);
+          if (isSimulatedServerActive) isSyncedSuccess = true;
+        }
+      } else if (isSimulatedServerActive) {
+        isSyncedSuccess = true;
+        logSync(`🛠️ [Server Giả lập] Đã mô phỏng đồng bộ phiếu [${item.id}].`);
+      }
+
+      if (isSyncedSuccess) {
+        item.synced = true;
+        item.syncedAt = new Date().toISOString();
+        await saveSurveyToDB(item);
+        successCount++;
+      }
+    } catch (err) {
+      console.warn(`[Sync] Network fetch error for ${item.id}:`, err.message);
+      if (isSimulatedServerActive) {
+        item.synced = true;
+        item.syncedAt = new Date().toISOString();
+        await saveSurveyToDB(item);
+        successCount++;
+        logSync(`🛠️ [Server Giả lập Fallback] Đã đồng bộ phiếu [${item.id}].`);
+      } else {
+        logSync(`❌ Lỗi kết nối HTTP khi gửi phiếu [${item.id}]: ${err.message}. Phiếu tiếp tục giữ lại ở Hàng chờ Offline.`);
+      }
+    }
   }
 
   await renderDashboard();
-  showToast(`✅ Đã đồng bộ thành công ${unsynced.length} phiếu khảo sát!`, 'success');
-  logSync(`Đã đồng bộ xong ${unsynced.length} phiếu khảo sát lên server.`);
+  if (successCount > 0) {
+    showToast(`✅ Đã đồng bộ thành công ${successCount}/${unsynced.length} phiếu khảo sát lên Cloud API!`, 'success');
+  } else {
+    showToast(`⚠️ Không thể kết nối Server API. Các phiếu khảo sát vẫn nằm an toàn ở Hàng chờ Offline!`, 'warning');
+  }
 }
 
 async function loadSampleData() {
