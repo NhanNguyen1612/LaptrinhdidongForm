@@ -226,13 +226,13 @@
             <p>Số bản ghi chờ đồng bộ lên máy chủ: <span class="badge badge-warning" id="sync-queue-count">0</span></p>
             
             <div style="margin: 12px 0;">
-              <label for="api-endpoint-input" style="font-size:12px; font-weight:bold; color:#475569;">🌐 Server API Endpoint Đồng bộ:</label>
-              <input type="text" id="api-endpoint-input" style="width:100%; font-size:12px; padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; margin-top:4px;" placeholder="https://jsonplaceholder.typicode.com/posts (Hoặc URL REST API thực tế)">
+              <label for="api-endpoint-input" style="font-size:12px; font-weight:bold; color:#475569;">🌐 Server API Endpoint Đồng bộ (Cloud Functions Backend):</label>
+              <input type="text" id="api-endpoint-input" style="width:100%; font-size:12px; padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; margin-top:4px;" placeholder="/api/surveys (Tự động nhận diện Cloudflare Pages Backend API)">
             </div>
 
             <div class="sync-actions">
               <button id="btn-force-sync" class="btn btn-primary">
-                ☁️ Đồng bộ danh sách với Server Ngay
+                ☁️ Đồng bộ 2 chiều với Cloud (Push & Pull)
               </button>
               <button id="btn-toggle-simulated-server" class="btn btn-outline">
                 🛠️ Bật Server Giả lập (Demo Sync)
