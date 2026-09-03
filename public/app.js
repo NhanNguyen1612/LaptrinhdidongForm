@@ -343,6 +343,20 @@ function setupEventListeners() {
   window.addEventListener('online', updateNetworkStatus);
   window.addEventListener('offline', updateNetworkStatus);
 
+  // Auto-polling Cloud every 10 seconds when online for real-time cross-device sync
+  setInterval(() => {
+    if (navigator.onLine) {
+      syncData(true);
+    }
+  }, 10000);
+
+  // Auto-sync when switching back to this browser tab
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && navigator.onLine) {
+      syncData(true);
+    }
+  });
+
   document.querySelectorAll('.nav-tab').forEach(tabBtn => {
     tabBtn.addEventListener('click', () => {
       const targetTab = tabBtn.dataset.tab;
@@ -905,11 +919,52 @@ window.closeModal = function() {
   document.getElementById('detail-modal').classList.add('hidden');
 };
 
+const DELETED_IDS_KEY = 'vku_deleted_survey_ids';
+
+function getDeletedSurveyIds() {
+  try {
+    return JSON.parse(localStorage.getItem(DELETED_IDS_KEY) || '[]');
+  } catch (e) {
+    return [];
+  }
+}
+
+function addDeletedSurveyId(id) {
+  const ids = getDeletedSurveyIds();
+  if (!ids.includes(id)) {
+    ids.push(id);
+    localStorage.setItem(DELETED_IDS_KEY, JSON.stringify(ids));
+  }
+}
+
 window.deleteSurveyItem = async function(id) {
-  if (confirm('Bạn có chắc muốn xóa phiếu khảo sát này?')) {
+  if (confirm('Bạn có chắc muốn xóa phiếu khảo sát này? Hành động này sẽ xóa đồng bộ vĩnh viễn trên toàn bộ các thiết bị!')) {
+    // 1. Delete locally from IndexedDB & record tombstone
     await deleteSurveyFromDB(id);
+    addDeletedSurveyId(id);
     await renderDashboard();
-    showToast('Đã xóa phiếu khảo sát thành công', 'success');
+    showToast('Đã xóa phiếu khảo sát nội bộ.', 'info');
+
+    // 2. Send DELETE request to Cloud Server API
+    if (navigator.onLine) {
+      try {
+        const endpoint = getApiEndpoint();
+        logSync(`🗑️ Đang gửi lệnh xóa phiếu [${id}] lên Cloud API...`);
+        const res = await fetch(`${endpoint}?id=${encodeURIComponent(id)}`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        if (res.ok) {
+          showToast('✅ Đã xóa vĩnh viễn phiếu khảo sát trên Cloud Server!', 'success');
+          logSync(`✅ [Cloud Delete] Đã xóa vĩnh viễn phiếu [${id}] trên Cloud Server.`);
+        } else {
+          logSync(`⚠️ Máy chủ trả về cảnh báo khi xóa phiếu [${id}].`);
+        }
+      } catch (err) {
+        console.warn('[Delete Sync] Error deleting from Cloud API:', err.message);
+        logSync(`⚠️ Lỗi mạng khi xóa phiếu [${id}] trên Cloud: ${err.message}`);
+      }
+    }
   }
 };
 
@@ -972,26 +1027,27 @@ function downloadBlob(content, filename, contentType) {
   URL.revokeObjectURL(url);
 }
 
-async function syncData() {
+async function syncData(isSilent = false) {
   const isOnline = navigator.onLine;
   if (!isOnline && !isSimulatedServerActive) {
-    showToast('Thiết bị đang OFFLINE! Dữ liệu được lưu an toàn tại Hàng chờ Offline (IndexedDB).', 'error');
-    logSync('Đồng bộ thất bại: Thiết bị chưa có kết nối mạng Internet.');
+    if (!isSilent) showToast('Thiết bị đang OFFLINE! Dữ liệu được lưu an toàn tại Hàng chờ Offline (IndexedDB).', 'error');
+    if (!isSilent) logSync('Đồng bộ thất bại: Thiết bị chưa có kết nối mạng Internet.');
     return;
   }
 
   const endpoint = getApiEndpoint();
-  logSync(`🌐 Bắt đầu đồng bộ 2 chiều (Push & Pull) với Cloud Server API [${endpoint}]...`);
+  if (!isSilent) logSync(`🌐 Bắt đầu đồng bộ 2 chiều (Push & Pull) với Cloud Server API [${endpoint}]...`);
 
   let pushedCount = 0;
   let pulledCount = 0;
+  const deletedIds = getDeletedSurveyIds();
 
-  // STEP 1: PUSH UNSYNCED LOCAL SURVEYS TO CLOUD
+  // STEP 1: PUSH UNSYNCED LOCAL SURVEYS TO CLOUD (SKIP LOCALLY DELETED)
   const localSurveys = await getAllSurveysFromDB();
-  const unsynced = localSurveys.filter(s => !s.synced);
+  const unsynced = localSurveys.filter(s => !s.synced && !deletedIds.includes(s.id));
 
   if (unsynced.length > 0) {
-    logSync(`📤 Đang đẩy ${unsynced.length} phiếu từ Hàng chờ Offline lên Cloud...`);
+    if (!isSilent) logSync(`📤 Đang đẩy ${unsynced.length} phiếu từ Hàng chờ Offline lên Cloud...`);
     for (const item of unsynced) {
       try {
         let isSyncedSuccess = false;
@@ -1008,14 +1064,14 @@ async function syncData() {
 
           if (res.ok || res.status === 200 || res.status === 201) {
             isSyncedSuccess = true;
-            logSync(`✅ [Cloud Push] HTTP ${res.status}: Đã đẩy thành công phiếu [${item.id}] lên Cloud API.`);
+            if (!isSilent) logSync(`✅ [Cloud Push] HTTP ${res.status}: Đã đẩy thành công phiếu [${item.id}] lên Cloud API.`);
           } else {
-            logSync(`⚠️ HTTP ${res.status}: Máy chủ phản hồi cảnh báo khi nhận phiếu [${item.id}].`);
+            if (!isSilent) logSync(`⚠️ HTTP ${res.status}: Máy chủ phản hồi cảnh báo khi nhận phiếu [${item.id}].`);
             if (isSimulatedServerActive) isSyncedSuccess = true;
           }
         } else if (isSimulatedServerActive) {
           isSyncedSuccess = true;
-          logSync(`🛠️ [Server Giả lập] Đã mô phỏng đẩy thành công phiếu [${item.id}].`);
+          if (!isSilent) logSync(`🛠️ [Server Giả lập] Đã mô phỏng đẩy thành công phiếu [${item.id}].`);
         }
 
         if (isSyncedSuccess) {
@@ -1032,16 +1088,16 @@ async function syncData() {
           await saveSurveyToDB(item);
           pushedCount++;
         } else {
-          logSync(`❌ Lỗi kết nối khi đẩy phiếu [${item.id}]: ${err.message}. Giữ lại ở Hàng chờ Offline.`);
+          if (!isSilent) logSync(`❌ Lỗi kết nối khi đẩy phiếu [${item.id}]: ${err.message}. Giữ lại ở Hàng chờ Offline.`);
         }
       }
     }
   }
 
-  // STEP 2: PULL ALL SURVEYS FROM CLOUD API & MERGE INTO LOCAL INDEXEDDB
+  // STEP 2: PULL ALL SURVEYS FROM CLOUD API & SYNCHRONIZE DELETIONS
   if (isOnline) {
     try {
-      logSync(`📥 Đang tải danh sách toàn bộ phiếu khảo sát từ Cloud API về thiết bị...`);
+      if (!isSilent) logSync(`📥 Đang tải danh sách toàn bộ phiếu khảo sát từ Cloud API về thiết bị...`);
       const res = await fetch(endpoint, {
         method: 'GET',
         headers: { 'Accept': 'application/json' }
@@ -1050,30 +1106,43 @@ async function syncData() {
       if (res.ok) {
         const cloudSurveys = await res.json();
         if (Array.isArray(cloudSurveys)) {
+          const cloudSurveyIds = new Set(cloudSurveys.map(s => s.id));
+
+          // A. Remove local synced surveys that were deleted on Cloud by another device
+          const currentLocalSurveys = await getAllSurveysFromDB();
+          for (const localItem of currentLocalSurveys) {
+            if (localItem.synced && !cloudSurveyIds.has(localItem.id)) {
+              await deleteSurveyFromDB(localItem.id);
+            }
+          }
+
+          // B. Merge valid cloud surveys into local IndexedDB (skip if deleted locally)
           for (const cloudItem of cloudSurveys) {
-            if (cloudItem && cloudItem.id) {
+            if (cloudItem && cloudItem.id && !deletedIds.includes(cloudItem.id)) {
               cloudItem.synced = true;
               await saveSurveyToDB(cloudItem);
               pulledCount++;
             }
           }
-          logSync(`✅ [Cloud Pull] Đã tải về và hợp nhất thành công ${cloudSurveys.length} phiếu từ Cloud.`);
+          if (!isSilent) logSync(`✅ [Cloud Pull] Đã tải về và hợp nhất thành công ${cloudSurveys.length} phiếu từ Cloud.`);
         }
       } else {
-        logSync(`⚠️ HTTP ${res.status}: Không thể tải dữ liệu từ Cloud.`);
+        if (!isSilent) logSync(`⚠️ HTTP ${res.status}: Không thể tải dữ liệu từ Cloud.`);
       }
     } catch (pullErr) {
       console.warn('[Sync Pull] Network error pulling from Cloud API:', pullErr.message);
-      logSync(`⚠️ Lỗi kết nối khi tải từ Cloud: ${pullErr.message}`);
+      if (!isSilent) logSync(`⚠️ Lỗi kết nối khi tải từ Cloud: ${pullErr.message}`);
     }
   }
 
   await renderDashboard();
 
-  if (pushedCount > 0 || pulledCount > 0) {
-    showToast(`✅ Hoàn tất đồng bộ: Đã đẩy ${pushedCount} phiếu mới, hợp nhất ${pulledCount} phiếu từ Cloud!`, 'success');
-  } else {
-    showToast(`✅ Tất cả dữ liệu khảo sát đã được đồng bộ với Cloud.`, 'info');
+  if (!isSilent) {
+    if (pushedCount > 0 || pulledCount > 0) {
+      showToast(`✅ Hoàn tất đồng bộ: Đã đẩy ${pushedCount} phiếu mới, hợp nhất ${pulledCount} phiếu từ Cloud!`, 'success');
+    } else {
+      showToast(`✅ Tất cả dữ liệu khảo sát đã được đồng bộ với Cloud.`, 'info');
+    }
   }
 }
 
