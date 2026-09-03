@@ -1,0 +1,29 @@
+{
+  "name": "vku-field-survey-pwa",
+  "version": "1.0.0",
+  "description": "Offline-first inspection form PWA for VKU campus facilities with zero network connectivity requirement.",
+  "main": "app/src/main/assets/www/index.html",
+  "scripts": {
+    "start": "npx serve app/src/main/assets/www",
+    "build": "echo 'Static PWA build ready in app/src/main/assets/www'",
+    "cap:add:android": "npx cap add android",
+    "cap:sync": "npx cap sync",
+    "cap:open:android": "npx cap open android"
+  },
+  "keywords": [
+    "pwa",
+    "vku",
+    "offline-first",
+    "indexeddb",
+    "service-worker",
+    "capacitor",
+    "android"
+  ],
+  "author": "VKU Student Developer",
+  "license": "MIT",
+  "devDependencies": {
+    "@capacitor/cli": "^6.0.0",
+    "@capacitor/core": "^6.0.0",
+    "@capacitor/android": "^6.0.0"
+  }
+}
