@@ -4,7 +4,7 @@
    Handles 100% persistent cross-device synchronization (GET, POST, DELETE)
    ========================================================================== */
 
-const MASTER_DB_URL = 'https://api.restful-api.dev/objects/ff808181a067127101a067d37b10032f';
+const MASTER_DB_URL = 'https://api.restful-api.dev/objects/ff808181a067127101a067f04e6e039a';
 
 async function getMasterSurveys() {
   try {
@@ -27,7 +27,7 @@ async function updateMasterSurveys(surveys) {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        name: 'VKU_PWA_SURVEYS_DATABASE_V1',
+        name: 'VKU_PWA_SURVEYS_DATABASE_V2',
         data: { surveys }
       })
     });

@@ -39,9 +39,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 6. Load Draft or Initialize First Inspection Item Entry in Form
   loadDraftFromStorage();
 
-  // 7. Trigger Auto Sync if online
+  // 7. ALWAYS Trigger Cloud Sync on app startup (Pull cloud surveys into new tab / device)
   if (navigator.onLine) {
-    setTimeout(() => autoSyncOfflineQueue(), 1500);
+    syncData(true);
   }
 });
 
@@ -592,19 +592,68 @@ function updateRemoveButtonsState() {
 
 const itemPhotoBase64Map = {};
 
-function handlePhotoForItem(e, id) {
+function compressImage(file, maxWidth = 600, maxHeight = 600, quality = 0.6) {
+  return new Promise((resolve) => {
+    if (!file || !file.type || !file.type.startsWith('image/')) {
+      resolve(null);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        const compressedBase64 = canvas.toDataURL('image/jpeg', quality);
+        resolve(compressedBase64);
+      };
+      img.onerror = () => resolve(e.target.result);
+      img.src = e.target.result;
+    };
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(file);
+  });
+}
+
+async function handlePhotoForItem(e, id) {
   const file = e.target.files[0];
   if (!file) return;
 
-  const reader = new FileReader();
-  reader.onload = (event) => {
-    itemPhotoBase64Map[id] = event.target.result;
-    const previewImg = document.getElementById(`photo-preview-${id}`);
-    const previewContainer = document.getElementById(`photo-preview-container-${id}`);
-    previewImg.src = event.target.result;
-    previewContainer.classList.remove('hidden');
-  };
-  reader.readAsDataURL(file);
+  const previewImg = document.getElementById(`photo-preview-${id}`);
+  const previewContainer = document.getElementById(`photo-preview-container-${id}`);
+
+  if (previewImg) previewImg.alt = 'Đang nén ảnh...';
+  showToast('📷 Đang nén ảnh tối ưu dung lượng...', 'info');
+
+  const compressedBase64 = await compressImage(file);
+  if (compressedBase64) {
+    itemPhotoBase64Map[id] = compressedBase64;
+    if (previewImg) {
+      previewImg.src = compressedBase64;
+      previewImg.alt = 'Ảnh minh chứng';
+    }
+    if (previewContainer) previewContainer.classList.remove('hidden');
+    saveDraftToStorage();
+    showToast('✅ Đã nén ảnh thành công (~30KB), truyền mạng siêu tốc!', 'success');
+  }
 }
 
 window.removePhotoForItem = function(id) {
@@ -1025,7 +1074,7 @@ function downloadBlob(content, filename, contentType) {
   URL.revokeObjectURL(url);
 }
 
-const DIRECT_CLOUD_FALLBACK_URL = 'https://api.restful-api.dev/objects/ff808181a067127101a067d37b10032f';
+const DIRECT_CLOUD_FALLBACK_URL = 'https://api.restful-api.dev/objects/ff808181a067127101a067f04e6e039a';
 
 async function fetchCloudSurveys(endpoint) {
   try {
