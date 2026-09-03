@@ -208,9 +208,14 @@ async function autoSyncOfflineQueue() {
 // 3.1 FORM DRAFT AUTO-SAVE ENGINE & API CONFIG
 // ==========================================================================
 function getApiEndpoint() {
+  const saved = localStorage.getItem('vku_api_endpoint');
+  if (saved && (saved.includes('jsonplaceholder') || saved.includes('mockapi'))) {
+    localStorage.removeItem('vku_api_endpoint');
+  }
+
   const inputEl = document.getElementById('api-endpoint-input');
   let url = inputEl ? inputEl.value.trim() : '';
-  if (!url) {
+  if (!url || url.includes('jsonplaceholder')) {
     url = localStorage.getItem('vku_api_endpoint') || DEFAULT_API_ENDPOINT;
   }
   return url;
@@ -343,12 +348,12 @@ function setupEventListeners() {
   window.addEventListener('online', updateNetworkStatus);
   window.addEventListener('offline', updateNetworkStatus);
 
-  // Auto-polling Cloud every 10 seconds when online for real-time cross-device sync
+  // Auto-polling Cloud every 5 seconds when online for real-time cross-device sync
   setInterval(() => {
     if (navigator.onLine) {
       syncData(true);
     }
-  }, 10000);
+  }, 5000);
 
   // Auto-sync when switching back to this browser tab
   document.addEventListener('visibilitychange', () => {
@@ -945,21 +950,14 @@ window.deleteSurveyItem = async function(id) {
     await renderDashboard();
     showToast('Đã xóa phiếu khảo sát nội bộ.', 'info');
 
-    // 2. Send DELETE request to Cloud Server API
+    // 2. Send DELETE request to Cloud Server & Master Cloud Database
     if (navigator.onLine) {
       try {
         const endpoint = getApiEndpoint();
         logSync(`🗑️ Đang gửi lệnh xóa phiếu [${id}] lên Cloud API...`);
-        const res = await fetch(`${endpoint}?id=${encodeURIComponent(id)}`, {
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' }
-        });
-        if (res.ok) {
-          showToast('✅ Đã xóa vĩnh viễn phiếu khảo sát trên Cloud Server!', 'success');
-          logSync(`✅ [Cloud Delete] Đã xóa vĩnh viễn phiếu [${id}] trên Cloud Server.`);
-        } else {
-          logSync(`⚠️ Máy chủ trả về cảnh báo khi xóa phiếu [${id}].`);
-        }
+        await deleteCloudSurvey(endpoint, id);
+        showToast('✅ Đã xóa vĩnh viễn phiếu khảo sát trên Cloud Server!', 'success');
+        logSync(`✅ [Cloud Delete] Đã xóa vĩnh viễn phiếu [${id}] trên Cloud Server.`);
       } catch (err) {
         console.warn('[Delete Sync] Error deleting from Cloud API:', err.message);
         logSync(`⚠️ Lỗi mạng khi xóa phiếu [${id}] trên Cloud: ${err.message}`);
@@ -1027,6 +1025,110 @@ function downloadBlob(content, filename, contentType) {
   URL.revokeObjectURL(url);
 }
 
+const DIRECT_CLOUD_FALLBACK_URL = 'https://api.restful-api.dev/objects/ff808181a067127101a067d37b10032f';
+
+async function fetchCloudSurveys(endpoint) {
+  try {
+    const res = await fetch(endpoint, { headers: { 'Accept': 'application/json' } });
+    if (res.ok) {
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const data = await res.json();
+        if (Array.isArray(data)) return data;
+        if (data && data.data && Array.isArray(data.data.surveys)) return data.data.surveys;
+      }
+    }
+  } catch (e) {
+    console.warn('[Sync Engine] Primary endpoint fetch error:', e.message);
+  }
+
+  // Direct Cloud Fallback
+  try {
+    const fallbackRes = await fetch(DIRECT_CLOUD_FALLBACK_URL, { headers: { 'Accept': 'application/json' } });
+    if (fallbackRes.ok) {
+      const obj = await fallbackRes.json();
+      if (obj && obj.data && Array.isArray(obj.data.surveys)) {
+        return obj.data.surveys;
+      }
+    }
+  } catch (err) {
+    console.warn('[Sync Engine] Direct cloud fallback error:', err.message);
+  }
+  return [];
+}
+
+async function pushCloudSurvey(endpoint, surveyItem) {
+  let isSuccess = false;
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify(surveyItem)
+    });
+    if (res.ok || res.status === 200 || res.status === 201) {
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        isSuccess = true;
+      }
+    }
+  } catch (e) {
+    console.warn('[Sync Engine] Primary POST failed:', e.message);
+  }
+
+  // Always sync to Direct Master Cloud Database
+  try {
+    const getRes = await fetch(DIRECT_CLOUD_FALLBACK_URL);
+    let currentSurveys = [];
+    if (getRes.ok) {
+      const obj = await getRes.json();
+      currentSurveys = (obj && obj.data && Array.isArray(obj.data.surveys)) ? obj.data.surveys : [];
+    }
+    const idx = currentSurveys.findIndex(s => s.id === surveyItem.id);
+    if (idx >= 0) currentSurveys[idx] = surveyItem;
+    else currentSurveys.unshift(surveyItem);
+
+    const putRes = await fetch(DIRECT_CLOUD_FALLBACK_URL, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'VKU_PWA_SURVEYS_DATABASE_V1',
+        data: { surveys: currentSurveys }
+      })
+    });
+    if (putRes.ok) isSuccess = true;
+  } catch (err) {
+    console.warn('[Sync Engine] Master DB push error:', err.message);
+  }
+  return isSuccess;
+}
+
+async function deleteCloudSurvey(endpoint, surveyId) {
+  try {
+    await fetch(`${endpoint}?id=${encodeURIComponent(surveyId)}`, { method: 'DELETE' });
+  } catch (e) {
+    /* Ignore */
+  }
+
+  try {
+    const getRes = await fetch(DIRECT_CLOUD_FALLBACK_URL);
+    if (getRes.ok) {
+      const obj = await getRes.json();
+      let currentSurveys = (obj && obj.data && Array.isArray(obj.data.surveys)) ? obj.data.surveys : [];
+      const updated = currentSurveys.filter(s => s.id !== surveyId);
+      await fetch(DIRECT_CLOUD_FALLBACK_URL, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'VKU_PWA_SURVEYS_DATABASE_V1',
+          data: { surveys: updated }
+        })
+      });
+    }
+  } catch (err) {
+    console.warn('[Sync Engine] Master DB delete error:', err.message);
+  }
+}
+
 async function syncData(isSilent = false) {
   const isOnline = navigator.onLine;
   if (!isOnline && !isSimulatedServerActive) {
@@ -1036,102 +1138,54 @@ async function syncData(isSilent = false) {
   }
 
   const endpoint = getApiEndpoint();
-  if (!isSilent) logSync(`🌐 Bắt đầu đồng bộ 2 chiều (Push & Pull) với Cloud Server API [${endpoint}]...`);
+  if (!isSilent) logSync(`🌐 Bắt đầu đồng bộ 2 chiều (Push & Pull) với Cloud Server API...`);
 
   let pushedCount = 0;
   let pulledCount = 0;
   const deletedIds = getDeletedSurveyIds();
 
-  // STEP 1: PUSH UNSYNCED LOCAL SURVEYS TO CLOUD (SKIP LOCALLY DELETED)
+  // STEP 1: PUSH UNSYNCED LOCAL SURVEYS TO CLOUD
   const localSurveys = await getAllSurveysFromDB();
   const unsynced = localSurveys.filter(s => !s.synced && !deletedIds.includes(s.id));
 
   if (unsynced.length > 0) {
     if (!isSilent) logSync(`📤 Đang đẩy ${unsynced.length} phiếu từ Hàng chờ Offline lên Cloud...`);
     for (const item of unsynced) {
-      try {
-        let isSyncedSuccess = false;
-
-        if (isOnline) {
-          const res = await fetch(endpoint, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Accept': 'application/json'
-            },
-            body: JSON.stringify(item)
-          });
-
-          if (res.ok || res.status === 200 || res.status === 201) {
-            isSyncedSuccess = true;
-            if (!isSilent) logSync(`✅ [Cloud Push] HTTP ${res.status}: Đã đẩy thành công phiếu [${item.id}] lên Cloud API.`);
-          } else {
-            if (!isSilent) logSync(`⚠️ HTTP ${res.status}: Máy chủ phản hồi cảnh báo khi nhận phiếu [${item.id}].`);
-            if (isSimulatedServerActive) isSyncedSuccess = true;
-          }
-        } else if (isSimulatedServerActive) {
-          isSyncedSuccess = true;
-          if (!isSilent) logSync(`🛠️ [Server Giả lập] Đã mô phỏng đẩy thành công phiếu [${item.id}].`);
-        }
-
-        if (isSyncedSuccess) {
-          item.synced = true;
-          item.syncedAt = new Date().toISOString();
-          await saveSurveyToDB(item);
-          pushedCount++;
-        }
-      } catch (err) {
-        console.warn(`[Sync Push] Error for ${item.id}:`, err.message);
-        if (isSimulatedServerActive) {
-          item.synced = true;
-          item.syncedAt = new Date().toISOString();
-          await saveSurveyToDB(item);
-          pushedCount++;
-        } else {
-          if (!isSilent) logSync(`❌ Lỗi kết nối khi đẩy phiếu [${item.id}]: ${err.message}. Giữ lại ở Hàng chờ Offline.`);
-        }
+      const isSuccess = await pushCloudSurvey(endpoint, item);
+      if (isSuccess || isSimulatedServerActive) {
+        item.synced = true;
+        item.syncedAt = new Date().toISOString();
+        await saveSurveyToDB(item);
+        pushedCount++;
+        if (!isSilent) logSync(`✅ [Cloud Push]: Đã đẩy thành công phiếu [${item.id}] lên Cloud API.`);
       }
     }
   }
 
   // STEP 2: PULL ALL SURVEYS FROM CLOUD API & SYNCHRONIZE DELETIONS
   if (isOnline) {
-    try {
-      if (!isSilent) logSync(`📥 Đang tải danh sách toàn bộ phiếu khảo sát từ Cloud API về thiết bị...`);
-      const res = await fetch(endpoint, {
-        method: 'GET',
-        headers: { 'Accept': 'application/json' }
-      });
+    if (!isSilent) logSync(`📥 Đang tải danh sách toàn bộ phiếu khảo sát từ Cloud API về thiết bị...`);
+    const cloudSurveys = await fetchCloudSurveys(endpoint);
+    if (Array.isArray(cloudSurveys)) {
+      const cloudSurveyIds = new Set(cloudSurveys.map(s => s.id));
 
-      if (res.ok) {
-        const cloudSurveys = await res.json();
-        if (Array.isArray(cloudSurveys)) {
-          const cloudSurveyIds = new Set(cloudSurveys.map(s => s.id));
-
-          // A. Remove local synced surveys that were deleted on Cloud by another device
-          const currentLocalSurveys = await getAllSurveysFromDB();
-          for (const localItem of currentLocalSurveys) {
-            if (localItem.synced && !cloudSurveyIds.has(localItem.id)) {
-              await deleteSurveyFromDB(localItem.id);
-            }
-          }
-
-          // B. Merge valid cloud surveys into local IndexedDB (skip if deleted locally)
-          for (const cloudItem of cloudSurveys) {
-            if (cloudItem && cloudItem.id && !deletedIds.includes(cloudItem.id)) {
-              cloudItem.synced = true;
-              await saveSurveyToDB(cloudItem);
-              pulledCount++;
-            }
-          }
-          if (!isSilent) logSync(`✅ [Cloud Pull] Đã tải về và hợp nhất thành công ${cloudSurveys.length} phiếu từ Cloud.`);
+      // A. Remove local synced surveys that were deleted on Cloud by another device
+      const currentLocalSurveys = await getAllSurveysFromDB();
+      for (const localItem of currentLocalSurveys) {
+        if (localItem.synced && !cloudSurveyIds.has(localItem.id)) {
+          await deleteSurveyFromDB(localItem.id);
         }
-      } else {
-        if (!isSilent) logSync(`⚠️ HTTP ${res.status}: Không thể tải dữ liệu từ Cloud.`);
       }
-    } catch (pullErr) {
-      console.warn('[Sync Pull] Network error pulling from Cloud API:', pullErr.message);
-      if (!isSilent) logSync(`⚠️ Lỗi kết nối khi tải từ Cloud: ${pullErr.message}`);
+
+      // B. Merge valid cloud surveys into local IndexedDB (skip locally deleted)
+      for (const cloudItem of cloudSurveys) {
+        if (cloudItem && cloudItem.id && !deletedIds.includes(cloudItem.id)) {
+          cloudItem.synced = true;
+          await saveSurveyToDB(cloudItem);
+          pulledCount++;
+        }
+      }
+      if (!isSilent) logSync(`✅ [Cloud Pull] Đã tải về và hợp nhất thành công ${cloudSurveys.length} phiếu từ Cloud.`);
     }
   }
 

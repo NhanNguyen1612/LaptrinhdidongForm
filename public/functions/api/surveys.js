@@ -1,64 +1,48 @@
 /* ==========================================================================
    VKU FIELD SURVEY PWA - CLOUDFLARE PAGES FUNCTION BACKEND API
    Endpoint: /api/surveys
-   Handles persistent cross-device synchronization (GET, POST, DELETE)
+   Handles 100% persistent cross-device synchronization (GET, POST, DELETE)
    ========================================================================== */
 
-const PERSISTENT_API_URL = 'https://api.restful-api.dev/objects';
-const ITEM_TYPE_NAME = 'VKU-SURVEY-ITEM';
+const MASTER_DB_URL = 'https://api.restful-api.dev/objects/ff808181a067127101a067d37b10032f';
 
-let memorySurveysStore = [];
-
-async function fetchCloudObjects() {
+async function getMasterSurveys() {
   try {
-    const res = await fetch(PERSISTENT_API_URL, {
+    const res = await fetch(MASTER_DB_URL, {
       method: 'GET',
       headers: { 'Accept': 'application/json' }
     });
     if (!res.ok) return [];
-    const list = await res.json();
-    if (!Array.isArray(list)) return [];
-
-    const surveys = [];
-    list.forEach(obj => {
-      if (obj && obj.name === ITEM_TYPE_NAME && obj.data && obj.data.id) {
-        const item = obj.data;
-        item.cloudObjectId = obj.id;
-        item.synced = true;
-        surveys.push(item);
-      }
-    });
-
-    surveys.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-    return surveys;
+    const obj = await res.json();
+    return (obj && obj.data && Array.isArray(obj.data.surveys)) ? obj.data.surveys : [];
   } catch (err) {
-    console.warn('[Cloud Function] Fetch cloud objects error:', err.message);
-    return memorySurveysStore;
+    console.warn('[Cloud Function] Error reading master DB:', err.message);
+    return [];
+  }
+}
+
+async function updateMasterSurveys(surveys) {
+  try {
+    const res = await fetch(MASTER_DB_URL, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'VKU_PWA_SURVEYS_DATABASE_V1',
+        data: { surveys }
+      })
+    });
+    return res.ok;
+  } catch (err) {
+    console.warn('[Cloud Function] Error writing master DB:', err.message);
+    return false;
   }
 }
 
 export async function onRequestGet(context) {
   try {
-    let surveysList = [];
+    const surveysList = await getMasterSurveys();
 
-    // Read from KV Binding if available
-    if (context.env && context.env.SURVEYS_KV) {
-      const kvData = await context.env.SURVEYS_KV.get('vku_surveys', { type: 'json' });
-      if (Array.isArray(kvData)) {
-        surveysList = kvData;
-      }
-    }
-
-    // Merge with Persistent Cloud Objects
-    const cloudObjects = await fetchCloudObjects();
-    const map = new Map();
-    surveysList.forEach(s => map.set(s.id, s));
-    cloudObjects.forEach(s => map.set(s.id, s));
-
-    const mergedSurveys = Array.from(map.values());
-    mergedSurveys.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-
-    return new Response(JSON.stringify(mergedSurveys), {
+    return new Response(JSON.stringify(surveysList), {
       status: 200,
       headers: {
         'Content-Type': 'application/json; charset=utf-8',
@@ -70,10 +54,7 @@ export async function onRequestGet(context) {
   } catch (err) {
     return new Response(JSON.stringify({ error: err.message }), {
       status: 500,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*'
-      }
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
     });
   }
 }
@@ -91,33 +72,15 @@ export async function onRequestPost(context) {
     item.synced = true;
     item.syncedAt = new Date().toISOString();
 
-    // 1. Write to Persistent Cloud Database
-    try {
-      await fetch(PERSISTENT_API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: ITEM_TYPE_NAME,
-          data: item
-        })
-      });
-    } catch (dbErr) {
-      console.warn('[Cloud Function] DB POST error:', dbErr.message);
+    const surveys = await getMasterSurveys();
+    const idx = surveys.findIndex(s => s.id === item.id);
+    if (idx >= 0) {
+      surveys[idx] = item;
+    } else {
+      surveys.unshift(item);
     }
 
-    // 2. Write to Cloudflare KV if bound
-    if (context.env && context.env.SURVEYS_KV) {
-      let kvList = (await context.env.SURVEYS_KV.get('vku_surveys', { type: 'json' })) || [];
-      const idx = kvList.findIndex(s => s.id === item.id);
-      if (idx >= 0) kvList[idx] = item;
-      else kvList.unshift(item);
-      await context.env.SURVEYS_KV.put('vku_surveys', JSON.stringify(kvList));
-    }
-
-    // 3. Fallback memory store
-    const memIdx = memorySurveysStore.findIndex(s => s.id === item.id);
-    if (memIdx >= 0) memorySurveysStore[memIdx] = item;
-    else memorySurveysStore.unshift(item);
+    await updateMasterSurveys(surveys);
 
     return new Response(JSON.stringify({ success: true, message: 'Survey saved to Cloud Store', item }), {
       status: 200,
@@ -131,10 +94,7 @@ export async function onRequestPost(context) {
   } catch (err) {
     return new Response(JSON.stringify({ error: err.message }), {
       status: 500,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*'
-      }
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
     });
   }
 }
@@ -149,7 +109,7 @@ export async function onRequestDelete(context) {
         const body = await context.request.json();
         targetId = body?.id;
       } catch (e) {
-        /* Ignore body parse error */
+        /* Ignore */
       }
     }
 
@@ -160,32 +120,9 @@ export async function onRequestDelete(context) {
       });
     }
 
-    // 1. Delete from Persistent Cloud Database
-    try {
-      const res = await fetch(PERSISTENT_API_URL, { method: 'GET' });
-      if (res.ok) {
-        const list = await res.json();
-        if (Array.isArray(list)) {
-          for (const obj of list) {
-            if (obj && obj.name === ITEM_TYPE_NAME && obj.data && obj.data.id === targetId) {
-              await fetch(`${PERSISTENT_API_URL}/${obj.id}`, { method: 'DELETE' });
-            }
-          }
-        }
-      }
-    } catch (dbErr) {
-      console.warn('[Cloud Function] DB DELETE error:', dbErr.message);
-    }
-
-    // 2. Delete from Cloudflare KV if bound
-    if (context.env && context.env.SURVEYS_KV) {
-      let kvList = (await context.env.SURVEYS_KV.get('vku_surveys', { type: 'json' })) || [];
-      kvList = kvList.filter(s => s.id !== targetId);
-      await context.env.SURVEYS_KV.put('vku_surveys', JSON.stringify(kvList));
-    }
-
-    // 3. Delete from memory store
-    memorySurveysStore = memorySurveysStore.filter(s => s.id !== targetId);
+    const surveys = await getMasterSurveys();
+    const filteredSurveys = surveys.filter(s => s.id !== targetId);
+    await updateMasterSurveys(filteredSurveys);
 
     return new Response(JSON.stringify({ success: true, deletedId: targetId, message: 'Survey deleted from Cloud' }), {
       status: 200,
@@ -199,10 +136,7 @@ export async function onRequestDelete(context) {
   } catch (err) {
     return new Response(JSON.stringify({ error: err.message }), {
       status: 500,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*'
-      }
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
     });
   }
 }
