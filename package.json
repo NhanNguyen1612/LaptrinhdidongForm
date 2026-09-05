@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "node scripts/build.js",
     "preview": "vite preview",
     "cap:add": "npx cap add android",
     "cap:sync": "npx cap sync",
