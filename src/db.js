@@ -2,7 +2,8 @@ import Dexie from 'dexie';
 
 export const db = new Dexie('VKUSurveyOfflineDB');
 
-db.version(2).stores({
-  offline_inspections: '++id, user_id, user_email, facility_name, description, status, image_url, created_at',
-  cloud_inspections: '++id, user_id, user_email, facility_name, description, status, image_url, created_at'
+db.version(3).stores({
+  offline_inspections: '++id, request_id, user_id, user_email, facility_name, description, status, image_url, latitude, longitude, location_address, created_at',
+  cloud_inspections: '++id, request_id, user_id, user_email, facility_name, description, status, image_url, latitude, longitude, location_address, created_at',
+  survey_requests: '++id, teacher_email, title, facility_name, categories, created_at'
 });

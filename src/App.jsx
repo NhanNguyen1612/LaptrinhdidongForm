@@ -142,7 +142,7 @@ export default function App() {
       </header>
 
       <main className="flex-1 max-w-6xl w-full mx-auto p-4 sm:p-6">
-        {role === 'student' ? <StudentForm user={user} /> : <TeacherDashboard />}
+        {role === 'student' ? <StudentForm user={user} /> : <TeacherDashboard user={user} />}
       </main>
 
       <footer className="bg-white border-t border-slate-200 py-3 text-center text-xs text-slate-500">

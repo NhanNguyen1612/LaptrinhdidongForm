@@ -10,6 +10,7 @@ const realClient = isPlaceholderUrl(defaultUrl) ? null : createClient(defaultUrl
 
 const CLOUD_INSPECTIONS_ENDPOINT = 'https://api.restful-api.dev/objects/ff808181a067127101a06f5c15de1544';
 const CLOUD_PROFILES_ENDPOINT = 'https://api.restful-api.dev/objects/ff808181a067127101a06f5a63741541';
+const CLOUD_SURVEY_REQUESTS_ENDPOINT = 'https://api.restful-api.dev/objects/ff808181a067127101a06f6588221548';
 
 const getRegisteredUsers = () => {
   try {
@@ -134,6 +135,32 @@ const saveCloudInspections = async (items) => {
   }
 };
 
+const fetchCloudSurveyRequests = async () => {
+  try {
+    const res = await fetch(CLOUD_SURVEY_REQUESTS_ENDPOINT);
+    if (!res.ok) throw new Error('Fetch requests failed');
+    const json = await res.json();
+    return json?.data?.requests || [];
+  } catch (e) {
+    return await db.survey_requests.toArray();
+  }
+};
+
+const saveCloudSurveyRequests = async (items) => {
+  try {
+    await fetch(CLOUD_SURVEY_REQUESTS_ENDPOINT, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'VKU_SURVEY_REQUESTS_INDEX',
+        data: { requests: items }
+      })
+    });
+  } catch (e) {
+    console.warn(e);
+  }
+};
+
 export const supabase = {
   auth: {
     async signUp({ email, password }) {
@@ -190,6 +217,11 @@ export const supabase = {
                 if (table === 'profiles') {
                   return { data: [], error: null };
                 }
+                if (table === 'survey_requests') {
+                  const items = await fetchCloudSurveyRequests();
+                  const filtered = items.filter(item => item[field] === val);
+                  return { data: filtered.reverse(), error: null };
+                }
                 const items = await fetchCloudInspections();
                 const filtered = items.filter(item => item[field] === val);
                 return { data: filtered.reverse(), error: null };
@@ -204,6 +236,10 @@ export const supabase = {
             };
           },
           async order() {
+            if (table === 'survey_requests') {
+              const items = await fetchCloudSurveyRequests();
+              return { data: items.reverse(), error: null };
+            }
             if (table === 'inspections') {
               const items = await fetchCloudInspections();
               return { data: items.reverse(), error: null };
@@ -218,6 +254,17 @@ export const supabase = {
             if (row.email && row.role) {
               saveUserRole(row.email, row.role);
             }
+          }
+        } else if (table === 'survey_requests') {
+          const current = await fetchCloudSurveyRequests();
+          const newItems = rows.map((r, index) => ({
+            id: r.id || Date.now() + index,
+            ...r
+          }));
+          const updated = [...current, ...newItems];
+          await saveCloudSurveyRequests(updated);
+          for (const item of newItems) {
+            try { await db.survey_requests.add(item); } catch (e) {}
           }
         } else if (table === 'inspections') {
           const current = await fetchCloudInspections();
@@ -236,7 +283,16 @@ export const supabase = {
       delete() {
         return {
           async eq(field, val) {
-            if (table === 'inspections') {
+            if (table === 'survey_requests') {
+              const current = await fetchCloudSurveyRequests();
+              const updated = current.filter(i => i.id !== val && i.id !== Number(val));
+              await saveCloudSurveyRequests(updated);
+              const allLocal = await db.survey_requests.toArray();
+              const target = allLocal.find(i => i.id === val || i.id === Number(val));
+              if (target && target.id) {
+                await db.survey_requests.delete(target.id);
+              }
+            } else if (table === 'inspections') {
               const current = await fetchCloudInspections();
               const updated = current.filter(i => i.id !== val && i.id !== Number(val));
               await saveCloudInspections(updated);
