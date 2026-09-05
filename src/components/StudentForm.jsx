@@ -2,13 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import { db } from '../db';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { Camera, Send, WifiOff, History, CheckCircle, MapPin, ClipboardList, Navigation, ArrowLeft, PlusCircle, RefreshCw } from 'lucide-react';
+import { Camera, Send, WifiOff, History, CheckCircle, MapPin, ClipboardList, Navigation, ArrowLeft, PlusCircle, RefreshCw, Lock, CheckSquare } from 'lucide-react';
 
 export default function StudentForm({ user }) {
   const [activeView, setActiveView] = useState('list');
   const [facilityName, setFacilityName] = useState('');
   const [description, setDescription] = useState('');
   const [status, setStatus] = useState('good');
+  const [categoryRatings, setCategoryRatings] = useState({});
   const [imageUrl, setImageUrl] = useState('');
   const [latitude, setLatitude] = useState(null);
   const [longitude, setLongitude] = useState(null);
@@ -87,6 +88,13 @@ export default function StudentForm({ user }) {
   };
 
   const handleStartSurvey = (req) => {
+    const cats = (req && Array.isArray(req.categories) && req.categories.length > 0)
+      ? req.categories
+      : ['Máy tính / Monitor', 'Bàn ghế', 'Điều hòa', 'Hệ thống chiếu sáng'];
+
+    const initialRatings = {};
+    cats.forEach(c => { initialRatings[c] = 'good'; });
+
     if (req) {
       setSelectedRequest(req);
       setSelectedRequestId(req.id);
@@ -96,6 +104,8 @@ export default function StudentForm({ user }) {
       setSelectedRequestId('');
       setFacilityName('');
     }
+
+    setCategoryRatings(initialRatings);
     setDescription('');
     setStatus('good');
     setImageUrl('');
@@ -109,6 +119,20 @@ export default function StudentForm({ user }) {
     setActiveView('list');
     setSelectedRequest(null);
     setSelectedRequestId('');
+  };
+
+  const handleCategoryRatingChange = (catName, ratingVal) => {
+    const newRatings = { ...categoryRatings, [catName]: ratingVal };
+    setCategoryRatings(newRatings);
+
+    const values = Object.values(newRatings);
+    if (values.includes('danger')) {
+      setStatus('danger');
+    } else if (values.includes('maintenance')) {
+      setStatus('maintenance');
+    } else {
+      setStatus('good');
+    }
   };
 
   const handleGetLocation = () => {
@@ -153,6 +177,7 @@ export default function StudentForm({ user }) {
       user_email: user.email,
       facility_name: facilityName,
       description,
+      category_ratings: categoryRatings,
       status,
       image_url: imageUrl,
       latitude,
@@ -177,6 +202,7 @@ export default function StudentForm({ user }) {
     setFacilityName('');
     setDescription('');
     setStatus('good');
+    setCategoryRatings({});
     setImageUrl('');
     setSelectedRequestId('');
     setSelectedRequest(null);
@@ -184,6 +210,8 @@ export default function StudentForm({ user }) {
     setActiveView('list');
     setTimeout(() => setSuccessMsg(''), 5000);
   };
+
+  const activeCategoriesList = Object.keys(categoryRatings);
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -312,13 +340,42 @@ export default function StudentForm({ user }) {
               <div className="space-y-3">
                 {cloudInspections.map((item) => (
                   <div key={item.id} className="p-4 bg-slate-50 rounded-xl border border-slate-200 flex justify-between items-start">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <h4 className="font-bold text-slate-900">{item.facility_name}</h4>
+                    <div className="space-y-2.5 w-full">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <h4 className="font-bold text-slate-900">{item.facility_name}</h4>
+                          <span className="text-[11px] text-slate-400">{new Date(item.created_at).toLocaleString('vi-VN')}</span>
+                        </div>
+                        <span className={`text-xs px-3 py-1 rounded-full font-medium ${
+                          item.status === 'good' ? 'bg-emerald-100 text-emerald-800' :
+                          item.status === 'maintenance' ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-800'
+                        }`}>
+                          {item.status === 'good' ? 'Tổng thể: Tốt 🟢' : item.status === 'maintenance' ? 'Tổng thể: Bảo trì 🟡' : 'Tổng thể: Hỏng 🔴'}
+                        </span>
                       </div>
+
+                      {item.category_ratings && typeof item.category_ratings === 'object' && (
+                        <div className="p-3 bg-white border border-slate-200 rounded-xl space-y-1.5">
+                          <span className="text-[11px] font-bold text-slate-600 uppercase block mb-1">Kết quả Đánh giá Từng Hạng mục:</span>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                            {Object.entries(item.category_ratings).map(([cat, rating]) => (
+                              <div key={cat} className="flex justify-between items-center bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-100">
+                                <span className="font-medium text-slate-800">✓ {cat}</span>
+                                <span className={`text-[11px] font-semibold px-2 py-0.5 rounded ${
+                                  rating === 'good' ? 'bg-emerald-50 text-emerald-700' :
+                                  rating === 'maintenance' ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700'
+                                }`}>
+                                  {rating === 'good' ? '🟢 Tốt' : rating === 'maintenance' ? '🟡 Bảo trì' : '🔴 Hỏng'}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
                       <p className="text-slate-700 text-xs">{item.description}</p>
+
                       <div className="flex items-center gap-3 pt-1">
-                        <span className="text-[11px] text-slate-400">{new Date(item.created_at).toLocaleString('vi-VN')}</span>
                         {item.latitude && item.longitude && (
                           <a
                             href={`https://www.google.com/maps?q=${item.latitude},${item.longitude}`}
@@ -334,17 +391,11 @@ export default function StudentForm({ user }) {
                             onClick={() => setPreviewImage(item.image_url)}
                             className="text-xs text-blue-700 font-semibold hover:underline"
                           >
-                            🖼️ Xem ảnh
+                            🖼️ Xem ảnh minh chứng
                           </button>
                         )}
                       </div>
                     </div>
-                    <span className={`text-xs px-3 py-1 rounded-full font-medium ${
-                      item.status === 'good' ? 'bg-emerald-100 text-emerald-800' :
-                      item.status === 'maintenance' ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-800'
-                    }`}>
-                      {item.status === 'good' ? 'Tốt 🟢' : item.status === 'maintenance' ? 'Bảo trì 🟡' : 'Hỏng 🔴'}
-                    </span>
                   </div>
                 ))}
               </div>
@@ -368,33 +419,82 @@ export default function StudentForm({ user }) {
           {selectedRequest && (
             <div className="p-4 bg-gradient-to-r from-blue-900 to-blue-800 text-white rounded-xl space-y-2">
               <h3 className="font-bold text-base">{selectedRequest.title}</h3>
-              <p className="text-xs text-blue-100">Cơ sở vật chất chỉ định: <span className="font-semibold text-amber-300">{selectedRequest.facility_name}</span></p>
-              {Array.isArray(selectedRequest.categories) && selectedRequest.categories.length > 0 && (
-                <div className="mt-2">
-                  <span className="text-[11px] text-blue-200 block mb-1">Các hạng mục Giảng viên yêu cầu kiểm tra:</span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {selectedRequest.categories.map((c, i) => (
-                      <span key={i} className="px-2.5 py-1 bg-white/20 text-white text-xs rounded-lg font-medium">
-                        ✓ {c}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
+              <p className="text-xs text-blue-100">Vị trí chỉ định: <span className="font-semibold text-amber-300">{selectedRequest.facility_name}</span></p>
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-6">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Tên Cơ sở Vật chất / Vị trí khảo sát</label>
+              <div className="flex justify-between items-center mb-1">
+                <label className="block text-sm font-medium text-slate-700">Tên Cơ sở Vật chất / Vị trí khảo sát</label>
+                {selectedRequest && (
+                  <span className="text-[11px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded flex items-center gap-1">
+                    <Lock size={12} /> Cố định theo yêu cầu của Giảng viên
+                  </span>
+                )}
+              </div>
               <input
                 type="text"
                 required
+                readOnly={!!selectedRequest}
                 value={facilityName}
                 onChange={(e) => setFacilityName(e.target.value)}
-                className="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                className={`w-full px-4 py-2.5 rounded-xl border ${
+                  selectedRequest ? 'bg-slate-100 text-slate-600 border-slate-300 cursor-not-allowed font-medium' : 'border-slate-300 focus:ring-2 focus:ring-blue-600 focus:outline-none'
+                }`}
                 placeholder="Ví dụ: Khu B - Phòng máy B102"
               />
+            </div>
+
+            <div className="p-5 bg-slate-50 border border-slate-200 rounded-2xl space-y-4">
+              <div className="flex items-center gap-2 border-b border-slate-200 pb-3">
+                <CheckSquare size={20} className="text-blue-900" />
+                <h3 className="font-bold text-slate-800 text-base">Đánh giá Chi tiết từng Hạng mục Kiểm tra</h3>
+              </div>
+              <p className="text-xs text-slate-500">Vui lòng đánh giá tình trạng riêng cho từng hạng mục dưới đây:</p>
+
+              <div className="space-y-3">
+                {activeCategoriesList.map((cat, idx) => (
+                  <div key={idx} className="p-3.5 bg-white rounded-xl border border-slate-200 flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+                    <span className="font-bold text-slate-800 text-sm">{idx + 1}. {cat}</span>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => handleCategoryRatingChange(cat, 'good')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                          categoryRatings[cat] === 'good'
+                            ? 'bg-emerald-600 text-white shadow-sm'
+                            : 'bg-slate-100 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700'
+                        }`}
+                      >
+                        🟢 Hoạt động tốt
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleCategoryRatingChange(cat, 'maintenance')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                          categoryRatings[cat] === 'maintenance'
+                            ? 'bg-amber-500 text-white shadow-sm'
+                            : 'bg-slate-100 text-slate-600 hover:bg-amber-50 hover:text-amber-700'
+                        }`}
+                      >
+                        🟡 Cần bảo trì
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleCategoryRatingChange(cat, 'danger')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                          categoryRatings[cat] === 'danger'
+                            ? 'bg-red-600 text-white shadow-sm'
+                            : 'bg-slate-100 text-slate-600 hover:bg-red-50 hover:text-red-700'
+                        }`}
+                      >
+                        🔴 Hỏng hóc
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
 
             <div>
@@ -424,28 +524,15 @@ export default function StudentForm({ user }) {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Mô tả tình trạng chi tiết các hạng mục</label>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Mô tả tổng quát / Ghi chú thêm</label>
               <textarea
                 required
                 rows={3}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 className="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-600 focus:outline-none"
-                placeholder="Mô tả chi tiết tình trạng các hạng mục (máy tính, bàn ghế, thiết bị điện...)"
+                placeholder="Mô tả ghi chú thêm nếu có..."
               />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Tình trạng đánh giá tổng thể</label>
-              <select
-                value={status}
-                onChange={(e) => setStatus(e.target.value)}
-                className="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-600 focus:outline-none bg-white font-medium"
-              >
-                <option value="good">🟢 Hoạt động tốt</option>
-                <option value="maintenance">🟡 Cần bảo trì</option>
-                <option value="danger">🔴 Hỏng hóc / Nguy hiểm</option>
-              </select>
             </div>
 
             <div>

@@ -302,7 +302,7 @@ export default function TeacherDashboard({ user }) {
                     <tr className="bg-slate-100 border-b border-slate-200 text-xs font-semibold text-slate-600 uppercase">
                       <th className="p-4">Cơ sở vật chất</th>
                       <th className="p-4">Sinh viên báo cáo</th>
-                      <th className="p-4">Đánh giá & Mô tả</th>
+                      <th className="p-4">Đánh giá Chi tiết Hạng mục</th>
                       <th className="p-4">Ảnh minh chứng</th>
                       <th className="p-4">Định vị GPS</th>
                       <th className="p-4 text-center">Hành động</th>
@@ -316,14 +316,32 @@ export default function TeacherDashboard({ user }) {
                           <span className="text-xs text-slate-400">{new Date(item.created_at).toLocaleString('vi-VN')}</span>
                         </td>
                         <td className="p-4 text-slate-600 text-xs">{item.user_email}</td>
-                        <td className="p-4 max-w-xs">
-                          <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium inline-block mb-1 ${
-                            item.status === 'good' ? 'bg-emerald-100 text-emerald-800' :
-                            item.status === 'maintenance' ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-800'
-                          }`}>
-                            {item.status === 'good' ? 'Tốt' : item.status === 'maintenance' ? 'Bảo trì' : 'Hỏng'}
-                          </span>
-                          <p className="text-slate-700 text-xs">{item.description}</p>
+                        <td className="p-4 max-w-sm">
+                          <div className="space-y-1.5">
+                            <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold inline-block ${
+                              item.status === 'good' ? 'bg-emerald-100 text-emerald-800' :
+                              item.status === 'maintenance' ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-800'
+                            }`}>
+                              Tổng thể: {item.status === 'good' ? 'Tốt 🟢' : item.status === 'maintenance' ? 'Bảo trì 🟡' : 'Hỏng 🔴'}
+                            </span>
+
+                            {item.category_ratings && typeof item.category_ratings === 'object' && (
+                              <div className="flex flex-wrap gap-1 mt-1">
+                                {Object.entries(item.category_ratings).map(([cat, rating]) => (
+                                  <span key={cat} className={`text-[10px] px-2 py-0.5 rounded border font-medium ${
+                                    rating === 'good' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' :
+                                    rating === 'maintenance' ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-red-50 text-red-800 border-red-200'
+                                  }`}>
+                                    {cat}: {rating === 'good' ? '🟢 Tốt' : rating === 'maintenance' ? '🟡 Bảo trì' : '🔴 Hỏng'}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+
+                            {item.description && (
+                              <p className="text-slate-600 text-xs mt-1 border-t border-slate-100 pt-1">{item.description}</p>
+                            )}
+                          </div>
                         </td>
                         <td className="p-4">
                           {item.image_url ? (
