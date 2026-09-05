@@ -10,8 +10,6 @@ function removePath(p) {
 
 removePath("app.js");
 removePath("public/app.js");
-removePath("functions");
-removePath("public/functions");
 removePath("public/style.css");
 removePath("assets");
 removePath("public/assets");
