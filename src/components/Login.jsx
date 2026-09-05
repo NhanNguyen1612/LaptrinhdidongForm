@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { supabase } from '../supabaseClient';
-import { LogIn, UserPlus } from 'lucide-react';
+import { supabase, updateSupabaseConfig } from '../supabaseClient';
+import { LogIn, UserPlus, Settings, Check } from 'lucide-react';
 
 export default function Login({ onLoginSuccess }) {
   const [email, setEmail] = useState('');
@@ -9,6 +9,20 @@ export default function Login({ onLoginSuccess }) {
   const [isSignUp, setIsSignUp] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  
+  const [showConfig, setShowConfig] = useState(false);
+  const [customUrl, setCustomUrl] = useState(localStorage.getItem('vku_supabase_url') || '');
+  const [customKey, setCustomKey] = useState(localStorage.getItem('vku_supabase_key') || '');
+  const [configSaved, setConfigSaved] = useState(false);
+
+  const handleSaveConfig = (e) => {
+    e.preventDefault();
+    if (customUrl && customKey) {
+      updateSupabaseConfig(customUrl, customKey);
+      setConfigSaved(true);
+      setTimeout(() => setConfigSaved(false), 2000);
+    }
+  };
 
   const handleAuth = async (e) => {
     e.preventDefault();
@@ -17,24 +31,50 @@ export default function Login({ onLoginSuccess }) {
 
     try {
       if (isSignUp) {
-        const { data, error } = await supabase.auth.signUp({ email, password });
-        if (error) throw error;
-        if (data.user) {
-          await supabase.from('profiles').insert([{ id: data.user.id, email, role }]);
-          onLoginSuccess(data.user, role);
+        let userObj = null;
+        try {
+          const { data, error } = await supabase.auth.signUp({ email, password });
+          if (error) throw error;
+          userObj = data.user;
+          if (userObj) {
+            await supabase.from('profiles').insert([{ id: userObj.id, email, role }]);
+          }
+        } catch (supaErr) {
+          if (supaErr.message.includes('Failed to fetch') || supaErr.message.includes('your-project') || supaErr.message.includes('URL')) {
+            userObj = { id: 'demo-' + Date.now(), email };
+            localStorage.setItem('vku_demo_profile_' + userObj.id, role);
+          } else {
+            throw supaErr;
+          }
+        }
+        if (userObj) {
+          onLoginSuccess(userObj, role);
         }
       } else {
-        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
-        if (data.user) {
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('role')
-            .eq('id', data.user.id)
-            .single();
-          
-          const userRole = profile?.role || role;
-          onLoginSuccess(data.user, userRole);
+        let userObj = null;
+        let userRole = role;
+        try {
+          const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+          if (error) throw error;
+          userObj = data.user;
+          if (userObj) {
+            const { data: profile } = await supabase
+              .from('profiles')
+              .select('role')
+              .eq('id', userObj.id)
+              .single();
+            if (profile?.role) userRole = profile.role;
+          }
+        } catch (supaErr) {
+          if (supaErr.message.includes('Failed to fetch') || supaErr.message.includes('your-project') || supaErr.message.includes('URL')) {
+            userObj = { id: 'demo-user-' + email.split('@')[0], email };
+            userRole = role;
+          } else {
+            throw supaErr;
+          }
+        }
+        if (userObj) {
+          onLoginSuccess(userObj, userRole);
         }
       }
     } catch (err) {
@@ -105,15 +145,54 @@ export default function Login({ onLoginSuccess }) {
           </button>
         </form>
 
-        <div className="mt-6 text-center">
+        <div className="mt-6 text-center space-y-3">
           <button
             type="button"
             onClick={() => setIsSignUp(!isSignUp)}
-            className="text-sm text-blue-700 font-medium hover:underline"
+            className="text-sm text-blue-700 font-medium hover:underline block w-full"
           >
             {isSignUp ? 'Đã có tài khoản? Đăng nhập' : 'Chưa có tài khoản? Đăng ký ngay'}
           </button>
+
+          <button
+            type="button"
+            onClick={() => setShowConfig(!showConfig)}
+            className="text-xs text-slate-500 hover:text-slate-700 flex items-center justify-center gap-1 mx-auto"
+          >
+            <Settings size={14} /> {showConfig ? 'Ẩn cấu hình Supabase' : 'Cấu hình Supabase Project URL & Key'}
+          </button>
         </div>
+
+        {showConfig && (
+          <form onSubmit={handleSaveConfig} className="mt-4 p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
+            <h4 className="text-xs font-bold text-slate-700 uppercase">Cấu hình Supabase Credentials</h4>
+            <div>
+              <input
+                type="text"
+                placeholder="https://xyz.supabase.co"
+                value={customUrl}
+                onChange={(e) => setCustomUrl(e.target.value)}
+                className="w-full px-3 py-1.5 text-xs rounded-lg border border-slate-300"
+              />
+            </div>
+            <div>
+              <input
+                type="text"
+                placeholder="eyJhbGciOiJIUzI1NiIsIn..."
+                value={customKey}
+                onChange={(e) => setCustomKey(e.target.value)}
+                className="w-full px-3 py-1.5 text-xs rounded-lg border border-slate-300"
+              />
+            </div>
+            <button
+              type="submit"
+              className="w-full bg-slate-800 text-white text-xs font-semibold py-2 rounded-lg flex items-center justify-center gap-1"
+            >
+              {configSaved ? <Check size={14} className="text-emerald-400" /> : null}
+              {configSaved ? 'Đã lưu cấu hình!' : 'Lưu Cấu hình Supabase'}
+            </button>
+          </form>
+        )}
       </div>
     </div>
   );

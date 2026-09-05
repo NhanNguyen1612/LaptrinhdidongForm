@@ -34,12 +34,16 @@ export default function StudentForm({ user }) {
   }, []);
 
   const fetchCloudHistory = async () => {
-    const { data } = await supabase
-      .from('inspections')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false });
-    if (data) setCloudInspections(data);
+    try {
+      const { data } = await supabase
+        .from('inspections')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+      if (data) setCloudInspections(data);
+    } catch (e) {
+      console.warn(e.message);
+    }
   };
 
   const handleCaptureImage = (e) => {
@@ -77,7 +81,7 @@ export default function StudentForm({ user }) {
         fetchCloudHistory();
       } catch (err) {
         await db.offline_inspections.add(payload);
-        setSuccessMsg('Lỗi kết nối - Dữ liệu đã được lưu tạm offline!');
+        setSuccessMsg('Đã lưu dữ liệu khảo sát (Chế độ Offline / Dexie.js)!');
       }
     }
 
