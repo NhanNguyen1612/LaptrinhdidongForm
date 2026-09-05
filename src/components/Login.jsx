@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { supabase, updateSupabaseConfig } from '../supabaseClient';
+import { supabase, updateSupabaseConfig, saveUserRole, getUserRoleByEmail } from '../supabaseClient';
 import { LogIn, UserPlus, Settings, Check } from 'lucide-react';
 
 export default function Login({ onLoginSuccess }) {
@@ -34,10 +34,12 @@ export default function Login({ onLoginSuccess }) {
 
     try {
       if (isSignUp) {
+        saveUserRole(email, role);
         const { data, error } = await supabase.auth.signUp({ email, password });
         if (error) throw error;
         if (data?.user) {
           userObj = data.user;
+          localStorage.setItem('vku_current_demo_user', JSON.stringify(userObj));
           await supabase.from('profiles').insert([{ id: userObj.id, email, role }]);
         }
       } else {
@@ -45,6 +47,8 @@ export default function Login({ onLoginSuccess }) {
         if (error) throw error;
         if (data?.user) {
           userObj = data.user;
+          localStorage.setItem('vku_current_demo_user', JSON.stringify(userObj));
+          userRole = getUserRoleByEmail(email);
           const { data: profile } = await supabase
             .from('profiles')
             .select('role')
@@ -54,12 +58,14 @@ export default function Login({ onLoginSuccess }) {
         }
       }
     } catch (err) {
-      console.warn('Supabase Auth error, using local session fallback:', err);
+      console.warn('Auth handling fallback:', err);
       userObj = { id: 'user-' + (email ? email.split('@')[0] : 'demo'), email: email || 'user@vku.udn.vn' };
-      userRole = isSignUp ? role : (email.includes('teacher') || email.includes('giangvien') ? 'teacher' : 'student');
+      localStorage.setItem('vku_current_demo_user', JSON.stringify(userObj));
+      userRole = isSignUp ? role : getUserRoleByEmail(email);
     }
 
     if (userObj) {
+      localStorage.setItem('vku_current_user_role_' + userObj.email, userRole);
       onLoginSuccess(userObj, userRole);
     }
     setLoading(false);

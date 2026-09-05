@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from './supabaseClient';
+import { supabase, getUserRoleByEmail } from './supabaseClient';
 import { db } from './db';
 import Login from './components/Login';
 import StudentForm from './components/StudentForm';
@@ -35,12 +35,18 @@ export default function App() {
     const { data: { session } } = await supabase.auth.getSession();
     if (session?.user) {
       setUser(session.user);
+      let detectedRole = getUserRoleByEmail(session.user.email);
+      const savedRole = localStorage.getItem('vku_current_user_role_' + session.user.email);
+      if (savedRole) detectedRole = savedRole;
+
       const { data: profile } = await supabase
         .from('profiles')
         .select('role')
         .eq('id', session.user.id)
         .single();
-      if (profile?.role) setRole(profile.role);
+      if (profile?.role) detectedRole = profile.role;
+
+      setRole(detectedRole);
     }
     setLoading(false);
   };
@@ -75,6 +81,7 @@ export default function App() {
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setUser(null);
+    setRole('student');
   };
 
   if (loading) {
