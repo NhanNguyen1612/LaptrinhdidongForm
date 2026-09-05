@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { supabase, updateSupabaseConfig, saveUserRole, getUserRoleByEmail } from '../supabaseClient';
+import { supabase, updateSupabaseConfig, saveUserRole, getUserRoleByEmail, registerLocalUser } from '../supabaseClient';
 import { LogIn, UserPlus, Settings, Check } from 'lucide-react';
 
 export default function Login({ onLoginSuccess }) {
@@ -34,7 +34,7 @@ export default function Login({ onLoginSuccess }) {
 
     try {
       if (isSignUp) {
-        saveUserRole(email, role);
+        registerLocalUser(email, role, password);
         const { data, error } = await supabase.auth.signUp({ email, password });
         if (error) throw error;
         if (data?.user) {
@@ -57,18 +57,16 @@ export default function Login({ onLoginSuccess }) {
           if (profile?.role) userRole = profile.role;
         }
       }
-    } catch (err) {
-      console.warn('Auth handling fallback:', err);
-      userObj = { id: 'user-' + (email ? email.split('@')[0] : 'demo'), email: email || 'user@vku.udn.vn' };
-      localStorage.setItem('vku_current_demo_user', JSON.stringify(userObj));
-      userRole = isSignUp ? role : getUserRoleByEmail(email);
-    }
 
-    if (userObj) {
-      localStorage.setItem('vku_current_user_role_' + userObj.email, userRole);
-      onLoginSuccess(userObj, userRole);
+      if (userObj) {
+        localStorage.setItem('vku_current_user_role_' + userObj.email, userRole);
+        onLoginSuccess(userObj, userRole);
+      }
+    } catch (err) {
+      setErrorMsg(err.message || 'Có lỗi xảy ra trong quá trình xác thực. Vui lòng kiểm tra lại.');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   return (

@@ -8,6 +8,28 @@ export const isPlaceholderUrl = (url) => !url || url.includes('your-project.supa
 
 const realClient = isPlaceholderUrl(defaultUrl) ? null : createClient(defaultUrl, defaultKey);
 
+const getRegisteredUsers = () => {
+  try {
+    return JSON.parse(localStorage.getItem('vku_registered_users') || '{}');
+  } catch (e) {
+    return {};
+  }
+};
+
+export const registerLocalUser = (email, role, password) => {
+  if (!email) return;
+  const users = getRegisteredUsers();
+  users[email.toLowerCase()] = { email, role, password };
+  localStorage.setItem('vku_registered_users', JSON.stringify(users));
+  saveUserRole(email, role);
+};
+
+export const getRegisteredUser = (email) => {
+  if (!email) return null;
+  const users = getRegisteredUsers();
+  return users[email.toLowerCase()] || null;
+};
+
 const getSavedRoles = () => {
   try {
     return JSON.parse(localStorage.getItem('vku_user_roles') || '{}');
@@ -28,6 +50,8 @@ export const getUserRoleByEmail = (email) => {
   const roles = getSavedRoles();
   const lower = email.toLowerCase();
   if (roles[lower]) return roles[lower];
+  const userObj = getRegisteredUser(email);
+  if (userObj?.role) return userObj.role;
   if (lower.includes('teacher') || lower.includes('giangvien')) return 'teacher';
   return 'student';
 };
@@ -38,13 +62,26 @@ export const supabase = {
       if (realClient) {
         return await realClient.auth.signUp({ email, password });
       }
-      return { data: { user: { id: 'demo-' + email.split('@')[0], email } }, error: null };
+      return { data: { user: { id: 'user-' + email.split('@')[0], email } }, error: null };
     },
     async signInWithPassword({ email, password }) {
       if (realClient) {
         return await realClient.auth.signInWithPassword({ email, password });
       }
-      return { data: { user: { id: 'demo-user-' + email.split('@')[0], email } }, error: null };
+      const registered = getRegisteredUser(email);
+      if (!registered) {
+        return {
+          data: { user: null },
+          error: new Error('Tài khoản chưa được đăng ký! Vui lòng chọn "Chưa có tài khoản? Đăng ký ngay" phía dưới.')
+        };
+      }
+      if (password && registered.password && registered.password !== password) {
+        return {
+          data: { user: null },
+          error: new Error('Mật khẩu không chính xác! Vui lòng kiểm tra lại.')
+        };
+      }
+      return { data: { user: { id: 'user-' + email.split('@')[0], email } }, error: null };
     },
     async getSession() {
       if (realClient) {
