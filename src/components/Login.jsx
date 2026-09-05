@@ -39,6 +39,7 @@ export default function Login({ onLoginSuccess }) {
         if (error) throw error;
         if (data?.user) {
           userObj = data.user;
+          sessionStorage.setItem('vku_current_demo_user', JSON.stringify(userObj));
           localStorage.setItem('vku_current_demo_user', JSON.stringify(userObj));
           await supabase.from('profiles').insert([{ id: userObj.id, email, role }]);
         }
@@ -47,6 +48,7 @@ export default function Login({ onLoginSuccess }) {
         if (error) throw error;
         if (data?.user) {
           userObj = data.user;
+          sessionStorage.setItem('vku_current_demo_user', JSON.stringify(userObj));
           localStorage.setItem('vku_current_demo_user', JSON.stringify(userObj));
           userRole = getUserRoleByEmail(email);
           const { data: profile } = await supabase
@@ -59,6 +61,7 @@ export default function Login({ onLoginSuccess }) {
       }
 
       if (userObj) {
+        sessionStorage.setItem('vku_active_session_role', userRole);
         localStorage.setItem('vku_current_user_role_' + userObj.email, userRole);
         onLoginSuccess(userObj, userRole);
       }

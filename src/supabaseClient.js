@@ -229,14 +229,17 @@ export const supabase = {
       if (realClient) {
         return await realClient.auth.getSession();
       }
-      const savedUser = localStorage.getItem('vku_current_demo_user');
+      const savedUser = sessionStorage.getItem('vku_current_demo_user') || localStorage.getItem('vku_current_demo_user');
       return { data: { session: savedUser ? { user: JSON.parse(savedUser) } : null } };
     },
     async signOut() {
       if (realClient) {
         return await realClient.auth.signOut();
       }
+      sessionStorage.removeItem('vku_current_demo_user');
+      sessionStorage.removeItem('vku_active_session_role');
       localStorage.removeItem('vku_current_demo_user');
+      localStorage.removeItem('vku_active_session_role');
       return { error: null };
     }
   },

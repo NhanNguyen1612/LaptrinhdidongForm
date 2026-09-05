@@ -4,7 +4,7 @@ import { db } from './db';
 import Login from './components/Login';
 import StudentForm from './components/StudentForm';
 import TeacherDashboard from './components/TeacherDashboard';
-import { LogOut, Wifi, WifiOff, RefreshCw } from 'lucide-react';
+import { LogOut, Wifi, WifiOff, RefreshCw, Repeat } from 'lucide-react';
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -35,7 +35,8 @@ export default function App() {
     const { data: { session } } = await supabase.auth.getSession();
     if (session?.user) {
       setUser(session.user);
-      let detectedRole = localStorage.getItem('vku_active_session_role') ||
+      let detectedRole = sessionStorage.getItem('vku_active_session_role') ||
+                         localStorage.getItem('vku_active_session_role') ||
                          localStorage.getItem('vku_current_user_role_' + session.user.email) ||
                          getUserRoleByEmail(session.user.email);
 
@@ -47,6 +48,7 @@ export default function App() {
       if (profile?.role) detectedRole = profile.role;
 
       setRole(detectedRole);
+      sessionStorage.setItem('vku_active_session_role', detectedRole);
       localStorage.setItem('vku_active_session_role', detectedRole);
     }
     setLoading(false);
@@ -76,15 +78,24 @@ export default function App() {
   const handleLoginSuccess = (userObj, userRole) => {
     setUser(userObj);
     setRole(userRole);
+    sessionStorage.setItem('vku_active_session_role', userRole);
     localStorage.setItem('vku_active_session_role', userRole);
     if (navigator.onLine) triggerAutoSync();
   };
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
+    sessionStorage.removeItem('vku_active_session_role');
     localStorage.removeItem('vku_active_session_role');
     setUser(null);
     setRole('student');
+  };
+
+  const toggleRole = () => {
+    const newRole = role === 'teacher' ? 'student' : 'teacher';
+    setRole(newRole);
+    sessionStorage.setItem('vku_active_session_role', newRole);
+    localStorage.setItem('vku_active_session_role', newRole);
   };
 
   if (loading) {
@@ -105,11 +116,17 @@ export default function App() {
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <h1 className="font-bold text-lg">VKU Field Survey</h1>
-            <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold uppercase ${
-              role === 'teacher' ? 'bg-amber-400 text-amber-950' : 'bg-blue-700 text-blue-100'
-            }`}>
+            <button
+              onClick={toggleRole}
+              className={`px-3 py-1 rounded-full text-xs font-semibold uppercase flex items-center gap-1.5 transition ${
+                role === 'teacher' ? 'bg-amber-400 text-amber-950 hover:bg-amber-300' : 'bg-blue-700 text-blue-100 hover:bg-blue-600'
+              }`}
+              title="Bấm để chuyển nhanh giữa giao diện Giảng viên và Sinh viên"
+            >
+              <Repeat size={13} />
               {role === 'teacher' ? 'Giảng viên' : 'Sinh viên'}
-            </span>
+              <span className="text-[10px] opacity-75 font-normal ml-0.5">(Đổi vai trò)</span>
+            </button>
           </div>
 
           <div className="flex items-center gap-4">
