@@ -2,6 +2,32 @@ import fs from "fs";
 import path from "path";
 import { execSync } from "child_process";
 
+function removePath(p) {
+  if (fs.existsSync(p)) {
+    fs.rmSync(p, { recursive: true, force: true });
+  }
+}
+
+removePath("app.js");
+removePath("public/app.js");
+removePath("functions");
+removePath("public/functions");
+removePath("public/style.css");
+removePath("assets");
+removePath("public/assets");
+removePath("dist");
+
+const rootFiles = fs.readdirSync(".");
+for (const f of rootFiles) {
+  if (f.startsWith("workbox-") && f.endsWith(".js")) removePath(f);
+}
+if (fs.existsSync("public")) {
+  const pubFiles = fs.readdirSync("public");
+  for (const f of pubFiles) {
+    if (f.startsWith("workbox-") && f.endsWith(".js")) removePath("public/" + f);
+  }
+}
+
 if (fs.existsSync("index.source.html")) {
   fs.copyFileSync("index.source.html", "index.html");
 }
@@ -38,4 +64,4 @@ for (const wb of workboxFiles) {
   fs.copyFileSync(path.join("dist", wb), wb);
 }
 
-console.log("Build synced successfully for static hosting!");
+console.log("Build cleaned up and synced successfully!");
