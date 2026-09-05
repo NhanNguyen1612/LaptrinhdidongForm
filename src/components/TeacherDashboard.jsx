@@ -25,6 +25,8 @@ export default function TeacherDashboard({ user }) {
 
     window.addEventListener('storage', handleSyncEvent);
 
+    const intervalId = setInterval(handleSyncEvent, 2000);
+
     const channel = typeof window !== 'undefined' && window.BroadcastChannel ? new BroadcastChannel('vku_survey_sync_channel') : null;
     if (channel) {
       channel.onmessage = (event) => {
@@ -34,6 +36,7 @@ export default function TeacherDashboard({ user }) {
 
     return () => {
       window.removeEventListener('storage', handleSyncEvent);
+      clearInterval(intervalId);
       if (channel) channel.close();
     };
   }, []);

@@ -94,13 +94,15 @@ const saveLocalStorageBackup = (key, items) => {
   }
 };
 
-const mergeItems = (listA = [], listB = []) => {
+const mergeItems = (primaryList = [], secondaryList = []) => {
   const map = new Map();
-  for (const item of listA) {
+  for (const item of primaryList) {
+    if (!item) continue;
     const k = item.id || (item.title + '_' + item.created_at) || JSON.stringify(item);
     map.set(String(k), item);
   }
-  for (const item of listB) {
+  for (const item of secondaryList) {
+    if (!item) continue;
     const k = item.id || (item.title + '_' + item.created_at) || JSON.stringify(item);
     if (!map.has(String(k))) {
       map.set(String(k), item);
@@ -139,27 +141,31 @@ const pullCloudRelaySync = async () => {
     const store = await res.json();
     let updated = false;
 
-    if (store && Array.isArray(store.survey_requests) && store.survey_requests.length > 0) {
+    if (store && Array.isArray(store.survey_requests)) {
       const currentLocal = getLocalStorageBackup('vku_shared_survey_requests');
-      const merged = mergeItems(currentLocal, store.survey_requests);
-      if (merged.length !== currentLocal.length) {
+      const merged = mergeItems(store.survey_requests, currentLocal);
+      if (merged.length > 0) {
         saveLocalStorageBackup('vku_shared_survey_requests', merged);
         for (const req of merged) {
-          try { await db.survey_requests.add(req); } catch (e) {}
+          try { await db.survey_requests.put(req); } catch (e) {}
         }
-        updated = true;
+        if (merged.length !== currentLocal.length || store.survey_requests.length > 0) {
+          updated = true;
+        }
       }
     }
 
-    if (store && Array.isArray(store.inspections) && store.inspections.length > 0) {
+    if (store && Array.isArray(store.inspections)) {
       const currentLocal = getLocalStorageBackup('vku_shared_inspections');
-      const merged = mergeItems(currentLocal, store.inspections);
-      if (merged.length !== currentLocal.length) {
+      const merged = mergeItems(store.inspections, currentLocal);
+      if (merged.length > 0) {
         saveLocalStorageBackup('vku_shared_inspections', merged);
         for (const insp of merged) {
-          try { await db.cloud_inspections.add(insp); } catch (e) {}
+          try { await db.cloud_inspections.put(insp); } catch (e) {}
         }
-        updated = true;
+        if (merged.length !== currentLocal.length || store.inspections.length > 0) {
+          updated = true;
+        }
       }
     }
 
@@ -170,7 +176,7 @@ const pullCloudRelaySync = async () => {
 };
 
 if (typeof window !== 'undefined') {
-  setInterval(pullCloudRelaySync, 3000);
+  setInterval(pullCloudRelaySync, 2000);
   window.addEventListener('focus', pullCloudRelaySync);
   pullCloudRelaySync();
 }
@@ -215,12 +221,12 @@ class MockQueryBuilder {
       let dexieItems = [];
       try { dexieItems = await db.survey_requests.toArray(); } catch (e) {}
       const localItems = getLocalStorageBackup('vku_shared_survey_requests');
-      items = mergeItems(dexieItems, localItems);
+      items = mergeItems(localItems, dexieItems);
     } else if (this.table === 'inspections') {
       let dexieItems = [];
       try { dexieItems = await db.cloud_inspections.toArray(); } catch (e) {}
       const localItems = getLocalStorageBackup('vku_shared_inspections');
-      items = mergeItems(dexieItems, localItems);
+      items = mergeItems(localItems, dexieItems);
     }
 
     for (const cond of this.conditions) {
@@ -318,7 +324,7 @@ export const supabase = {
           for (const row of rows) {
             const cleanRow = { ...row };
             if (!cleanRow.id) cleanRow.id = Date.now() + Math.floor(Math.random() * 1000);
-            try { await db.survey_requests.add(cleanRow); } catch (e) {}
+            try { await db.survey_requests.put(cleanRow); } catch (e) {}
             currentLocal.push(cleanRow);
             sendCloudRelaySync({ type: 'ADD_REQUEST', payload: cleanRow });
           }
@@ -329,7 +335,7 @@ export const supabase = {
           for (const row of rows) {
             const cleanRow = { ...row };
             if (!cleanRow.id) cleanRow.id = Date.now() + Math.floor(Math.random() * 1000);
-            try { await db.cloud_inspections.add(cleanRow); } catch (e) {}
+            try { await db.cloud_inspections.put(cleanRow); } catch (e) {}
             currentLocal.push(cleanRow);
             sendCloudRelaySync({ type: 'ADD_INSPECTION', payload: cleanRow });
           }

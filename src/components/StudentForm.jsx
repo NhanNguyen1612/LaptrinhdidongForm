@@ -47,6 +47,8 @@ export default function StudentForm({ user }) {
     fetchCloudHistory();
     fetchTeacherRequests();
 
+    const intervalId = setInterval(handleSyncEvent, 2000);
+
     const channel = typeof window !== 'undefined' && window.BroadcastChannel ? new BroadcastChannel('vku_survey_sync_channel') : null;
     if (channel) {
       channel.onmessage = (event) => {
@@ -58,6 +60,7 @@ export default function StudentForm({ user }) {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
       window.removeEventListener('storage', handleSyncEvent);
+      clearInterval(intervalId);
       if (channel) channel.close();
     };
   }, []);
