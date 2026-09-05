@@ -1,5 +1,6 @@
-# Node modules
+# Node & Build
 node_modules/
+dist/
 
 # Android build outputs & local properties
 android/app/build/
@@ -9,8 +10,10 @@ android/local.properties
 android/captures/
 *.keystore
 
-# OS & IDE files
+# OS & Environment
 .DS_Store
 Thumbs.db
+.env
+.env.local
 .idea/
 .vscode/

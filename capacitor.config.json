@@ -1,17 +1,8 @@
 {
   "appId": "vn.edu.vku.fieldsurvey",
   "appName": "VKU Field Survey PWA",
-  "webDir": "app/src/main/assets/www",
-  "bundledWebRuntime": false,
+  "webDir": "dist",
   "server": {
     "androidScheme": "https"
-  },
-  "plugins": {
-    "Camera": {
-      "permissions": ["camera", "photos"]
-    },
-    "Geolocation": {
-      "permissions": ["location"]
-    }
   }
 }
