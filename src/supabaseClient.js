@@ -8,6 +8,9 @@ export const isPlaceholderUrl = (url) => !url || url.includes('your-project.supa
 
 const realClient = isPlaceholderUrl(defaultUrl) ? null : createClient(defaultUrl, defaultKey);
 
+const CLOUD_INSPECTIONS_ENDPOINT = 'https://api.restful-api.dev/objects/ff808181a067127101a06f5c15de1544';
+const CLOUD_PROFILES_ENDPOINT = 'https://api.restful-api.dev/objects/ff808181a067127101a06f5a63741541';
+
 const getRegisteredUsers = () => {
   try {
     return JSON.parse(localStorage.getItem('vku_registered_users') || '{}');
@@ -16,12 +19,46 @@ const getRegisteredUsers = () => {
   }
 };
 
-export const registerLocalUser = (email, role, password) => {
+const fetchCloudProfiles = async () => {
+  try {
+    const res = await fetch(CLOUD_PROFILES_ENDPOINT);
+    if (!res.ok) return getRegisteredUsers();
+    const json = await res.json();
+    const remote = json?.data?.profiles || {};
+    const local = getRegisteredUsers();
+    const merged = { ...local, ...remote };
+    localStorage.setItem('vku_registered_users', JSON.stringify(merged));
+    return merged;
+  } catch (e) {
+    return getRegisteredUsers();
+  }
+};
+
+const saveCloudProfile = async (email, role, password) => {
   if (!email) return;
-  const users = getRegisteredUsers();
-  users[email.toLowerCase()] = { email, role, password };
-  localStorage.setItem('vku_registered_users', JSON.stringify(users));
+  const local = getRegisteredUsers();
+  local[email.toLowerCase()] = { email, role, password };
+  localStorage.setItem('vku_registered_users', JSON.stringify(local));
   saveUserRole(email, role);
+
+  try {
+    const remote = await fetchCloudProfiles();
+    remote[email.toLowerCase()] = { email, role, password };
+    await fetch(CLOUD_PROFILES_ENDPOINT, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'VKU_PROFILES_INDEX',
+        data: { profiles: remote }
+      })
+    });
+  } catch (e) {
+    console.warn(e);
+  }
+};
+
+export const registerLocalUser = (email, role, password) => {
+  saveCloudProfile(email, role, password);
 };
 
 export const getRegisteredUser = (email) => {
@@ -71,6 +108,32 @@ export const getUserRoleByEmail = (identifier) => {
   return 'student';
 };
 
+const fetchCloudInspections = async () => {
+  try {
+    const res = await fetch(CLOUD_INSPECTIONS_ENDPOINT);
+    if (!res.ok) throw new Error('Cloud fetch failed');
+    const json = await res.json();
+    return json?.data?.inspections || [];
+  } catch (e) {
+    return await db.cloud_inspections.toArray();
+  }
+};
+
+const saveCloudInspections = async (items) => {
+  try {
+    await fetch(CLOUD_INSPECTIONS_ENDPOINT, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'VKU_SURVEY_INDEX',
+        data: { inspections: items }
+      })
+    });
+  } catch (e) {
+    console.warn(e);
+  }
+};
+
 export const supabase = {
   auth: {
     async signUp({ email, password }) {
@@ -83,6 +146,7 @@ export const supabase = {
       if (realClient) {
         return await realClient.auth.signInWithPassword({ email, password });
       }
+      await fetchCloudProfiles();
       const registered = getRegisteredUser(email);
       if (!registered) {
         return {
@@ -126,8 +190,9 @@ export const supabase = {
                 if (table === 'profiles') {
                   return { data: [], error: null };
                 }
-                const items = await db.cloud_inspections.where(field).equals(val).toArray();
-                return { data: items.reverse(), error: null };
+                const items = await fetchCloudInspections();
+                const filtered = items.filter(item => item[field] === val);
+                return { data: filtered.reverse(), error: null };
               },
               async single() {
                 if (table === 'profiles') {
@@ -140,7 +205,7 @@ export const supabase = {
           },
           async order() {
             if (table === 'inspections') {
-              const items = await db.cloud_inspections.toArray();
+              const items = await fetchCloudInspections();
               return { data: items.reverse(), error: null };
             }
             return { data: [], error: null };
@@ -155,8 +220,15 @@ export const supabase = {
             }
           }
         } else if (table === 'inspections') {
-          for (const row of rows) {
-            await db.cloud_inspections.add(row);
+          const current = await fetchCloudInspections();
+          const newItems = rows.map((r, index) => ({
+            id: r.id || Date.now() + index,
+            ...r
+          }));
+          const updated = [...current, ...newItems];
+          await saveCloudInspections(updated);
+          for (const item of newItems) {
+            try { await db.cloud_inspections.add(item); } catch (e) {}
           }
         }
         return { data: rows, error: null };
@@ -165,8 +237,11 @@ export const supabase = {
         return {
           async eq(field, val) {
             if (table === 'inspections') {
-              const all = await db.cloud_inspections.toArray();
-              const target = all.find(i => i.id === val || i.id === Number(val));
+              const current = await fetchCloudInspections();
+              const updated = current.filter(i => i.id !== val && i.id !== Number(val));
+              await saveCloudInspections(updated);
+              const allLocal = await db.cloud_inspections.toArray();
+              const target = allLocal.find(i => i.id === val || i.id === Number(val));
               if (target && target.id) {
                 await db.cloud_inspections.delete(target.id);
               }
