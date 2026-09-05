@@ -35,9 +35,9 @@ export default function App() {
     const { data: { session } } = await supabase.auth.getSession();
     if (session?.user) {
       setUser(session.user);
-      let detectedRole = getUserRoleByEmail(session.user.email);
-      const savedRole = localStorage.getItem('vku_current_user_role_' + session.user.email);
-      if (savedRole) detectedRole = savedRole;
+      let detectedRole = localStorage.getItem('vku_active_session_role') ||
+                         localStorage.getItem('vku_current_user_role_' + session.user.email) ||
+                         getUserRoleByEmail(session.user.email);
 
       const { data: profile } = await supabase
         .from('profiles')
@@ -47,6 +47,7 @@ export default function App() {
       if (profile?.role) detectedRole = profile.role;
 
       setRole(detectedRole);
+      localStorage.setItem('vku_active_session_role', detectedRole);
     }
     setLoading(false);
   };
@@ -75,11 +76,13 @@ export default function App() {
   const handleLoginSuccess = (userObj, userRole) => {
     setUser(userObj);
     setRole(userRole);
+    localStorage.setItem('vku_active_session_role', userRole);
     if (navigator.onLine) triggerAutoSync();
   };
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
+    localStorage.removeItem('vku_active_session_role');
     setUser(null);
     setRole('student');
   };

@@ -45,13 +45,28 @@ export const saveUserRole = (email, role) => {
   localStorage.setItem('vku_user_roles', JSON.stringify(roles));
 };
 
-export const getUserRoleByEmail = (email) => {
-  if (!email) return 'student';
+export const getUserRoleByEmail = (identifier) => {
+  if (!identifier) return 'student';
   const roles = getSavedRoles();
-  const lower = email.toLowerCase();
+  const lower = identifier.toLowerCase();
   if (roles[lower]) return roles[lower];
-  const userObj = getRegisteredUser(email);
-  if (userObj?.role) return userObj.role;
+
+  const cleanId = lower.replace(/^user-|^demo-|^demo-user-/, '');
+  for (const key in roles) {
+    const keyLower = key.toLowerCase();
+    if (keyLower === cleanId || keyLower.includes(cleanId) || cleanId.includes(keyLower)) {
+      return roles[key];
+    }
+  }
+
+  const users = getRegisteredUsers();
+  for (const emailKey in users) {
+    const emailLower = emailKey.toLowerCase();
+    if (emailLower === cleanId || emailLower.includes(cleanId) || cleanId.includes(emailLower)) {
+      return users[emailKey].role;
+    }
+  }
+
   if (lower.includes('teacher') || lower.includes('giangvien')) return 'teacher';
   return 'student';
 };
