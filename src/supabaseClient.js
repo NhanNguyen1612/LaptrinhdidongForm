@@ -24,7 +24,7 @@ const saveCloudProfile = (email, role, password) => {
   local[email.toLowerCase()] = { email, role, password };
   localStorage.setItem('vku_registered_users', JSON.stringify(local));
   saveUserRole(email, role);
-  if (syncChannel) syncChannel.postMessage({ type: 'PROFILE_UPDATED' });
+  notifySync('PROFILE_UPDATED');
 };
 
 export const registerLocalUser = (email, role, password) => {
@@ -78,6 +78,126 @@ export const getUserRoleByEmail = (identifier) => {
   return 'student';
 };
 
+const getLocalStorageBackup = (key) => {
+  try {
+    return JSON.parse(localStorage.getItem(key) || '[]');
+  } catch (e) {
+    return [];
+  }
+};
+
+const saveLocalStorageBackup = (key, items) => {
+  try {
+    localStorage.setItem(key, JSON.stringify(items));
+  } catch (e) {
+    console.warn(e);
+  }
+};
+
+const mergeItems = (listA = [], listB = []) => {
+  const map = new Map();
+  for (const item of listA) {
+    const k = item.id || (item.title + '_' + item.created_at) || JSON.stringify(item);
+    map.set(String(k), item);
+  }
+  for (const item of listB) {
+    const k = item.id || (item.title + '_' + item.created_at) || JSON.stringify(item);
+    if (!map.has(String(k))) {
+      map.set(String(k), item);
+    }
+  }
+  return Array.from(map.values());
+};
+
+const notifySync = (type) => {
+  if (syncChannel) {
+    try {
+      syncChannel.postMessage({ type });
+    } catch (e) {}
+  }
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('storage'));
+  }
+};
+
+class MockQueryBuilder {
+  constructor(table) {
+    this.table = table;
+    this.conditions = [];
+    this.isSingle = false;
+    this.orderByField = null;
+    this.ascending = true;
+  }
+
+  eq(field, val) {
+    this.conditions.push({ field, val });
+    return this;
+  }
+
+  order(field, options = {}) {
+    this.orderByField = field;
+    this.ascending = options.ascending !== undefined ? options.ascending : true;
+    return this;
+  }
+
+  single() {
+    this.isSingle = true;
+    return this;
+  }
+
+  async execute() {
+    if (this.table === 'profiles') {
+      const emailCond = this.conditions.find(c => c.field === 'email' || c.field === 'id');
+      if (emailCond) {
+        const role = getUserRoleByEmail(emailCond.val);
+        return { data: this.isSingle ? { role } : [{ role }], error: null };
+      }
+      return { data: this.isSingle ? null : [], error: null };
+    }
+
+    let items = [];
+    if (this.table === 'survey_requests') {
+      let dexieItems = [];
+      try { dexieItems = await db.survey_requests.toArray(); } catch (e) {}
+      const localItems = getLocalStorageBackup('vku_shared_survey_requests');
+      items = mergeItems(dexieItems, localItems);
+    } else if (this.table === 'inspections') {
+      let dexieItems = [];
+      try { dexieItems = await db.cloud_inspections.toArray(); } catch (e) {}
+      const localItems = getLocalStorageBackup('vku_shared_inspections');
+      items = mergeItems(dexieItems, localItems);
+    }
+
+    for (const cond of this.conditions) {
+      items = items.filter(item => String(item[cond.field]) === String(cond.val));
+    }
+
+    if (this.orderByField) {
+      const field = this.orderByField;
+      const asc = this.ascending;
+      items.sort((a, b) => {
+        const valA = a[field] || '';
+        const valB = b[field] || '';
+        if (valA < valB) return asc ? -1 : 1;
+        if (valA > valB) return asc ? 1 : -1;
+        return 0;
+      });
+    } else {
+      items.reverse();
+    }
+
+    if (this.isSingle) {
+      return { data: items[0] || null, error: null };
+    }
+
+    return { data: items, error: null };
+  }
+
+  then(onfulfilled, onrejected) {
+    return this.execute().then(onfulfilled, onrejected);
+  }
+}
+
 export const supabase = {
   auth: {
     async signUp({ email, password }) {
@@ -126,43 +246,7 @@ export const supabase = {
     }
     return {
       select() {
-        return {
-          eq(field, val) {
-            return {
-              async order() {
-                if (table === 'profiles') {
-                  return { data: [], error: null };
-                }
-                if (table === 'survey_requests') {
-                  const all = await db.survey_requests.toArray();
-                  const items = all.filter(i => String(i[field]) === String(val));
-                  return { data: items.reverse(), error: null };
-                }
-                const all = await db.cloud_inspections.toArray();
-                const items = all.filter(i => String(i[field]) === String(val));
-                return { data: items.reverse(), error: null };
-              },
-              async single() {
-                if (table === 'profiles') {
-                  const role = getUserRoleByEmail(val);
-                  return { data: { role }, error: null };
-                }
-                return { data: null, error: null };
-              }
-            };
-          },
-          async order() {
-            if (table === 'survey_requests') {
-              const items = await db.survey_requests.toArray();
-              return { data: items.reverse(), error: null };
-            }
-            if (table === 'inspections') {
-              const items = await db.cloud_inspections.toArray();
-              return { data: items.reverse(), error: null };
-            }
-            return { data: [], error: null };
-          }
-        };
+        return new MockQueryBuilder(table);
       },
       async insert(rows) {
         if (table === 'profiles') {
@@ -172,19 +256,25 @@ export const supabase = {
             }
           }
         } else if (table === 'survey_requests') {
+          const currentLocal = getLocalStorageBackup('vku_shared_survey_requests');
           for (const row of rows) {
             const cleanRow = { ...row };
-            delete cleanRow.id;
-            await db.survey_requests.add(cleanRow);
+            if (!cleanRow.id) cleanRow.id = Date.now() + Math.floor(Math.random() * 1000);
+            try { await db.survey_requests.add(cleanRow); } catch (e) {}
+            currentLocal.push(cleanRow);
           }
-          if (syncChannel) syncChannel.postMessage({ type: 'REQUEST_ADDED' });
+          saveLocalStorageBackup('vku_shared_survey_requests', currentLocal);
+          notifySync('REQUEST_ADDED');
         } else if (table === 'inspections') {
+          const currentLocal = getLocalStorageBackup('vku_shared_inspections');
           for (const row of rows) {
             const cleanRow = { ...row };
-            delete cleanRow.id;
-            await db.cloud_inspections.add(cleanRow);
+            if (!cleanRow.id) cleanRow.id = Date.now() + Math.floor(Math.random() * 1000);
+            try { await db.cloud_inspections.add(cleanRow); } catch (e) {}
+            currentLocal.push(cleanRow);
           }
-          if (syncChannel) syncChannel.postMessage({ type: 'INSPECTION_ADDED' });
+          saveLocalStorageBackup('vku_shared_inspections', currentLocal);
+          notifySync('INSPECTION_ADDED');
         }
         return { data: rows, error: null };
       },
@@ -192,19 +282,29 @@ export const supabase = {
         return {
           async eq(field, val) {
             if (table === 'survey_requests') {
-              const allLocal = await db.survey_requests.toArray();
-              const target = allLocal.find(i => String(i[field]) === String(val));
-              if (target && target.id) {
-                await db.survey_requests.delete(target.id);
-              }
-              if (syncChannel) syncChannel.postMessage({ type: 'REQUEST_DELETED' });
+              try {
+                const allLocal = await db.survey_requests.toArray();
+                const target = allLocal.find(i => String(i[field]) === String(val));
+                if (target && target.id) {
+                  await db.survey_requests.delete(target.id);
+                }
+              } catch (e) {}
+              let currentBackup = getLocalStorageBackup('vku_shared_survey_requests');
+              currentBackup = currentBackup.filter(i => String(i[field]) !== String(val));
+              saveLocalStorageBackup('vku_shared_survey_requests', currentBackup);
+              notifySync('REQUEST_DELETED');
             } else if (table === 'inspections') {
-              const allLocal = await db.cloud_inspections.toArray();
-              const target = allLocal.find(i => String(i[field]) === String(val));
-              if (target && target.id) {
-                await db.cloud_inspections.delete(target.id);
-              }
-              if (syncChannel) syncChannel.postMessage({ type: 'INSPECTION_DELETED' });
+              try {
+                const allLocal = await db.cloud_inspections.toArray();
+                const target = allLocal.find(i => String(i[field]) === String(val));
+                if (target && target.id) {
+                  await db.cloud_inspections.delete(target.id);
+                }
+              } catch (e) {}
+              let currentBackup = getLocalStorageBackup('vku_shared_inspections');
+              currentBackup = currentBackup.filter(i => String(i[field]) !== String(val));
+              saveLocalStorageBackup('vku_shared_inspections', currentBackup);
+              notifySync('INSPECTION_DELETED');
             }
             return { error: null };
           }

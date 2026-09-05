@@ -19,16 +19,21 @@ export default function TeacherDashboard({ user }) {
   useEffect(() => {
     fetchData();
 
+    const handleSyncEvent = () => {
+      fetchData();
+    };
+
+    window.addEventListener('storage', handleSyncEvent);
+
     const channel = typeof window !== 'undefined' && window.BroadcastChannel ? new BroadcastChannel('vku_survey_sync_channel') : null;
     if (channel) {
       channel.onmessage = (event) => {
-        if (event.data?.type === 'INSPECTION_ADDED' || event.data?.type === 'INSPECTION_DELETED' || event.data?.type === 'REQUEST_ADDED' || event.data?.type === 'REQUEST_DELETED') {
-          fetchData();
-        }
+        handleSyncEvent();
       };
     }
 
     return () => {
+      window.removeEventListener('storage', handleSyncEvent);
       if (channel) channel.close();
     };
   }, []);

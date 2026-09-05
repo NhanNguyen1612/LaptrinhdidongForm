@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import { db } from '../db';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { Camera, Send, WifiOff, History, CheckCircle, MapPin, ClipboardList, Navigation, ArrowLeft, PlusCircle } from 'lucide-react';
+import { Camera, Send, WifiOff, History, CheckCircle, MapPin, ClipboardList, Navigation, ArrowLeft, PlusCircle, RefreshCw } from 'lucide-react';
 
 export default function StudentForm({ user }) {
   const [activeView, setActiveView] = useState('list');
@@ -36,24 +36,27 @@ export default function StudentForm({ user }) {
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
+    const handleSyncEvent = () => {
+      fetchCloudHistory();
+      fetchTeacherRequests();
+    };
+
+    window.addEventListener('storage', handleSyncEvent);
+
     fetchCloudHistory();
     fetchTeacherRequests();
 
     const channel = typeof window !== 'undefined' && window.BroadcastChannel ? new BroadcastChannel('vku_survey_sync_channel') : null;
     if (channel) {
       channel.onmessage = (event) => {
-        if (event.data?.type === 'REQUEST_ADDED' || event.data?.type === 'REQUEST_DELETED') {
-          fetchTeacherRequests();
-        }
-        if (event.data?.type === 'INSPECTION_ADDED' || event.data?.type === 'INSPECTION_DELETED') {
-          fetchCloudHistory();
-        }
+        handleSyncEvent();
       };
     }
 
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('storage', handleSyncEvent);
       if (channel) channel.close();
     };
   }, []);
@@ -201,7 +204,7 @@ export default function StudentForm({ user }) {
       {activeView === 'list' ? (
         <div className="space-y-6">
           <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-            <div className="flex justify-between items-center mb-4">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
               <div>
                 <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
                   <ClipboardList size={24} className="text-blue-900" />
@@ -211,12 +214,24 @@ export default function StudentForm({ user }) {
                   Chọn một phiếu khảo sát dưới đây để bắt đầu thực hiện kiểm tra và đánh giá
                 </p>
               </div>
-              <button
-                onClick={() => handleStartSurvey(null)}
-                className="px-4 py-2.5 bg-blue-900 hover:bg-blue-800 text-white rounded-xl text-xs font-semibold flex items-center gap-2 shadow transition"
-              >
-                <PlusCircle size={16} /> Khảo sát Tự chọn
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    fetchTeacherRequests();
+                    fetchCloudHistory();
+                  }}
+                  className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition"
+                  title="Tải lại danh sách"
+                >
+                  <RefreshCw size={16} />
+                </button>
+                <button
+                  onClick={() => handleStartSurvey(null)}
+                  className="px-4 py-2.5 bg-blue-900 hover:bg-blue-800 text-white rounded-xl text-xs font-semibold flex items-center gap-2 shadow transition"
+                >
+                  <PlusCircle size={16} /> Khảo sát Tự chọn
+                </button>
+              </div>
             </div>
 
             {teacherRequests.length === 0 ? (
