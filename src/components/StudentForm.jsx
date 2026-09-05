@@ -70,19 +70,18 @@ export default function StudentForm({ user }) {
       created_at: new Date().toISOString()
     };
 
-    if (!navigator.onLine) {
-      await db.offline_inspections.add(payload);
-      setSuccessMsg('Đang offline - Dữ liệu đã lưu tạm vào bộ nhớ thiết bị!');
-    } else {
-      try {
-        const { error } = await supabase.from('inspections').insert([payload]);
-        if (error) throw error;
-        setSuccessMsg('Gửi báo cáo thành công lên máy chủ Cloud!');
-        fetchCloudHistory();
-      } catch (err) {
+    try {
+      if (!navigator.onLine) {
         await db.offline_inspections.add(payload);
-        setSuccessMsg('Đã lưu dữ liệu khảo sát (Chế độ Offline / Dexie.js)!');
+        setSuccessMsg('Đang offline - Dữ liệu đã lưu tạm vào bộ nhớ thiết bị!');
+      } else {
+        await supabase.from('inspections').insert([payload]);
+        setSuccessMsg('Gửi báo cáo khảo sát thành công!');
+        fetchCloudHistory();
       }
+    } catch (err) {
+      await db.offline_inspections.add(payload);
+      setSuccessMsg('Đã lưu dữ liệu khảo sát vào bộ nhớ tạm (Dexie.js)!');
     }
 
     setFacilityName('');
@@ -191,7 +190,7 @@ export default function StudentForm({ user }) {
 
         {offlineInspections?.length > 0 && (
           <div className="mb-4">
-            <h4 className="text-xs font-semibold text-amber-700 uppercase tracking-wider mb-2">Đang chờ đồng bộ (Offline Queue)</h4>
+            <h4 className="text-xs font-semibold text-amber-700 uppercase tracking-wider mb-2">Đang lưu tạm thiết bị (Dexie.js Queue)</h4>
             <div className="space-y-2">
               {offlineInspections.map((item) => (
                 <div key={item.id} className="p-3 bg-amber-50 rounded-xl border border-amber-200 flex justify-between items-center text-sm">
@@ -199,7 +198,7 @@ export default function StudentForm({ user }) {
                     <span className="font-semibold text-slate-800">{item.facility_name}</span>
                     <p className="text-slate-500 text-xs">{item.description}</p>
                   </div>
-                  <span className="text-xs px-2.5 py-1 rounded-full bg-amber-200 text-amber-900 font-medium">Offline</span>
+                  <span className="text-xs px-2.5 py-1 rounded-full bg-amber-200 text-amber-900 font-medium">Local / Dexie.js</span>
                 </div>
               ))}
             </div>
