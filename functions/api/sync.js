@@ -22,6 +22,23 @@ async function saveStore(env, store) {
   }
 }
 
+const mergeArrays = (listA = [], listB = []) => {
+  const map = new Map();
+  for (const item of listA) {
+    if (!item) continue;
+    const k = item.id || (item.title + '_' + item.created_at) || JSON.stringify(item);
+    map.set(String(k), item);
+  }
+  for (const item of listB) {
+    if (!item) continue;
+    const k = item.id || (item.title + '_' + item.created_at) || JSON.stringify(item);
+    if (!map.has(String(k))) {
+      map.set(String(k), item);
+    }
+  }
+  return Array.from(map.values());
+};
+
 export async function onRequestGet(context) {
   const store = await getStore(context.env);
   return new Response(JSON.stringify(store), {
@@ -56,18 +73,14 @@ export async function onRequestPost(context) {
       store.inspections = store.inspections.filter(i => String(i.id) !== String(body.id));
     } else if (body && body.type === 'FULL_SYNC' && body.payload) {
       if (Array.isArray(body.payload.survey_requests)) {
-        for (const req of body.payload.survey_requests) {
-          if (!store.survey_requests.some(r => String(r.id) === String(req.id))) {
-            store.survey_requests.unshift(req);
-          }
+        if (body.payload.is_teacher_update) {
+          store.survey_requests = body.payload.survey_requests;
+        } else {
+          store.survey_requests = mergeArrays(body.payload.survey_requests, store.survey_requests);
         }
       }
       if (Array.isArray(body.payload.inspections)) {
-        for (const insp of body.payload.inspections) {
-          if (!store.inspections.some(i => String(i.id) === String(insp.id))) {
-            store.inspections.unshift(insp);
-          }
-        }
+        store.inspections = mergeArrays(body.payload.inspections, store.inspections);
       }
     }
 

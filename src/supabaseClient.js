@@ -133,6 +133,34 @@ const sendCloudRelaySync = async (payload) => {
   } catch (e) {}
 };
 
+export const sendFullCloudSync = async (isTeacherUpdate = false) => {
+  if (!navigator.onLine) return;
+  try {
+    const localRequests = getLocalStorageBackup('vku_shared_survey_requests');
+    const localInspections = getLocalStorageBackup('vku_shared_inspections');
+    let dexieReqs = [];
+    let dexieInsps = [];
+    try { dexieReqs = await db.survey_requests.toArray(); } catch (e) {}
+    try { dexieInsps = await db.cloud_inspections.toArray(); } catch (e) {}
+
+    const allRequests = mergeItems(localRequests, dexieReqs);
+    const allInspections = mergeItems(localInspections, dexieInsps);
+
+    await fetch('/api/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'FULL_SYNC',
+        payload: {
+          survey_requests: allRequests,
+          inspections: allInspections,
+          is_teacher_update: isTeacherUpdate
+        }
+      })
+    });
+  } catch (e) {}
+};
+
 const pullCloudRelaySync = async () => {
   if (!navigator.onLine) return;
   try {
@@ -141,31 +169,27 @@ const pullCloudRelaySync = async () => {
     const store = await res.json();
     let updated = false;
 
-    if (store && Array.isArray(store.survey_requests)) {
+    if (store && Array.isArray(store.survey_requests) && store.survey_requests.length > 0) {
       const currentLocal = getLocalStorageBackup('vku_shared_survey_requests');
       const merged = mergeItems(store.survey_requests, currentLocal);
-      if (merged.length > 0) {
-        saveLocalStorageBackup('vku_shared_survey_requests', merged);
-        for (const req of merged) {
-          try { await db.survey_requests.put(req); } catch (e) {}
-        }
-        if (merged.length !== currentLocal.length || store.survey_requests.length > 0) {
-          updated = true;
-        }
+      saveLocalStorageBackup('vku_shared_survey_requests', merged);
+      for (const req of merged) {
+        try { await db.survey_requests.put(req); } catch (e) {}
+      }
+      if (merged.length !== currentLocal.length || store.survey_requests.length > currentLocal.length) {
+        updated = true;
       }
     }
 
-    if (store && Array.isArray(store.inspections)) {
+    if (store && Array.isArray(store.inspections) && store.inspections.length > 0) {
       const currentLocal = getLocalStorageBackup('vku_shared_inspections');
       const merged = mergeItems(store.inspections, currentLocal);
-      if (merged.length > 0) {
-        saveLocalStorageBackup('vku_shared_inspections', merged);
-        for (const insp of merged) {
-          try { await db.cloud_inspections.put(insp); } catch (e) {}
-        }
-        if (merged.length !== currentLocal.length || store.inspections.length > 0) {
-          updated = true;
-        }
+      saveLocalStorageBackup('vku_shared_inspections', merged);
+      for (const insp of merged) {
+        try { await db.cloud_inspections.put(insp); } catch (e) {}
+      }
+      if (merged.length !== currentLocal.length || store.inspections.length > currentLocal.length) {
+        updated = true;
       }
     }
 
@@ -177,6 +201,7 @@ const pullCloudRelaySync = async () => {
 
 if (typeof window !== 'undefined') {
   setInterval(pullCloudRelaySync, 2000);
+  setInterval(() => sendFullCloudSync(false), 4000);
   window.addEventListener('focus', pullCloudRelaySync);
   pullCloudRelaySync();
 }
@@ -326,10 +351,10 @@ export const supabase = {
             if (!cleanRow.id) cleanRow.id = Date.now() + Math.floor(Math.random() * 1000);
             try { await db.survey_requests.put(cleanRow); } catch (e) {}
             currentLocal.push(cleanRow);
-            sendCloudRelaySync({ type: 'ADD_REQUEST', payload: cleanRow });
           }
           saveLocalStorageBackup('vku_shared_survey_requests', currentLocal);
           notifySync('REQUEST_ADDED');
+          await sendFullCloudSync(true);
         } else if (table === 'inspections') {
           const currentLocal = getLocalStorageBackup('vku_shared_inspections');
           for (const row of rows) {
@@ -337,10 +362,10 @@ export const supabase = {
             if (!cleanRow.id) cleanRow.id = Date.now() + Math.floor(Math.random() * 1000);
             try { await db.cloud_inspections.put(cleanRow); } catch (e) {}
             currentLocal.push(cleanRow);
-            sendCloudRelaySync({ type: 'ADD_INSPECTION', payload: cleanRow });
           }
           saveLocalStorageBackup('vku_shared_inspections', currentLocal);
           notifySync('INSPECTION_ADDED');
+          await sendFullCloudSync(false);
         }
         return { data: rows, error: null };
       },
@@ -360,6 +385,7 @@ export const supabase = {
               saveLocalStorageBackup('vku_shared_survey_requests', currentBackup);
               sendCloudRelaySync({ type: 'DELETE_REQUEST', id: val });
               notifySync('REQUEST_DELETED');
+              await sendFullCloudSync(true);
             } else if (table === 'inspections') {
               try {
                 const allLocal = await db.cloud_inspections.toArray();
@@ -373,6 +399,7 @@ export const supabase = {
               saveLocalStorageBackup('vku_shared_inspections', currentBackup);
               sendCloudRelaySync({ type: 'DELETE_INSPECTION', id: val });
               notifySync('INSPECTION_DELETED');
+              await sendFullCloudSync(false);
             }
             return { error: null };
           }
