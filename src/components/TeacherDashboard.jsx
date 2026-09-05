@@ -18,6 +18,19 @@ export default function TeacherDashboard({ user }) {
 
   useEffect(() => {
     fetchData();
+
+    const channel = typeof window !== 'undefined' && window.BroadcastChannel ? new BroadcastChannel('vku_survey_sync_channel') : null;
+    if (channel) {
+      channel.onmessage = (event) => {
+        if (event.data?.type === 'INSPECTION_ADDED' || event.data?.type === 'INSPECTION_DELETED' || event.data?.type === 'REQUEST_ADDED' || event.data?.type === 'REQUEST_DELETED') {
+          fetchData();
+        }
+      };
+    }
+
+    return () => {
+      if (channel) channel.close();
+    };
   }, []);
 
   const fetchData = async () => {
@@ -27,19 +40,27 @@ export default function TeacherDashboard({ user }) {
   };
 
   const fetchAllInspections = async () => {
-    const { data } = await supabase
-      .from('inspections')
-      .select('*')
-      .order('created_at', { ascending: false });
-    if (data) setInspections(data);
+    try {
+      const { data } = await supabase
+        .from('inspections')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (data) setInspections(data);
+    } catch (e) {
+      console.warn(e);
+    }
   };
 
   const fetchAllRequests = async () => {
-    const { data } = await supabase
-      .from('survey_requests')
-      .select('*')
-      .order('created_at', { ascending: false });
-    if (data) setRequests(data);
+    try {
+      const { data } = await supabase
+        .from('survey_requests')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (data) setRequests(data);
+    } catch (e) {
+      console.warn(e);
+    }
   };
 
   const handleCreateRequest = async (e) => {
@@ -76,8 +97,9 @@ export default function TeacherDashboard({ user }) {
   };
 
   const filteredInspections = inspections.filter((item) => {
-    const matchesSearch = item.facility_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          item.user_email.toLowerCase().includes(searchTerm.toLowerCase());
+    const facilityMatch = item.facility_name ? item.facility_name.toLowerCase().includes(searchTerm.toLowerCase()) : false;
+    const userMatch = item.user_email ? item.user_email.toLowerCase().includes(searchTerm.toLowerCase()) : false;
+    const matchesSearch = facilityMatch || userMatch;
     const matchesStatus = statusFilter === 'all' || item.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
@@ -360,4 +382,3 @@ export default function TeacherDashboard({ user }) {
     </div>
   );
 }
-
